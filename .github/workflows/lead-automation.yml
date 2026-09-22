@@ -1,0 +1,62 @@
+name: Lead Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "How long should the automation run?"
+        required: true
+        default: "300"
+        type: string
+
+jobs:
+  lead-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Show automation settings
+        run: |
+          echo "Lead Automation Started"
+          echo "Duration: ${{ inputs.duration_minutes }} minutes"
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p data
+          echo "Workspace ready."
+
+      - name: Run automation
+        env:
+          DURATION_MINUTES: ${{ inputs.duration_minutes }}
+        run: |
+          python - <<'PY'
+          import os
+          import time
+
+          duration = int(os.environ.get("DURATION_MINUTES", "300"))
+
+          print("Lead Automation is running...")
+          print(f"Maximum duration: {duration} minutes")
+
+          start_time = time.time()
+          end_time = start_time + (duration * 60)
+
+          while time.time() < end_time:
+              elapsed = int((time.time() - start_time) / 60)
+              print(f"Automation running: {elapsed} minute(s)")
+              time.sleep(60)
+
+          print("Lead Automation finished.")
+          PY
+
+      - name: Finish
+        run: |
+          echo "Lead Automation completed."
