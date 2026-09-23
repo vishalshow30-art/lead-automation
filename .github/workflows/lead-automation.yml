@@ -6,7 +6,7 @@ on:
       duration_minutes:
         description: "How long should the automation run?"
         required: true
-        default: "300"
+        default: "1"
         type: string
 
 jobs:
@@ -33,29 +33,14 @@ jobs:
           mkdir -p data
           echo "Workspace ready."
 
-      - name: Run automation
-        env:
-          DURATION_MINUTES: ${{ inputs.duration_minutes }}
+      - name: Run Lead Collector
         run: |
-          python - <<'PY'
-          import os
-          import time
+          python src/lead_collector.py
 
-          duration = int(os.environ.get("DURATION_MINUTES", "300"))
-
-          print("Lead Automation is running...")
-          print(f"Maximum duration: {duration} minutes")
-
-          start_time = time.time()
-          end_time = start_time + (duration * 60)
-
-          while time.time() < end_time:
-              elapsed = int((time.time() - start_time) / 60)
-              print(f"Automation running: {elapsed} minute(s)")
-              time.sleep(60)
-
-          print("Lead Automation finished.")
-          PY
+      - name: Show leads database
+        run: |
+          echo "Current leads.csv:"
+          cat data/leads.csv
 
       - name: Finish
         run: |
