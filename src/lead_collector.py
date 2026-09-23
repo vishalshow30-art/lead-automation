@@ -53,8 +53,8 @@ def main():
     print("Lead Collector started.")
     print(f"Database: {LEADS_FILE}")
 
-    # Safe test record.
-    # Real leads will be added later from authorized/public sources.
+    # Safe test record
+    # This is only for testing CSV writing.
     test_lead = {
         "name": "TEST_LEAD",
         "platform": "test",
@@ -78,9 +78,10 @@ def main():
         "notes": "Automation test record",
     }
 
-    # Uncomment the next line only when you want to test CSV writing.
-    # add_lead(test_lead)
+    # Write the test lead into leads.csv
+    add_lead(test_lead)
 
+    print("Test lead added successfully.")
     print("Lead Collector is ready.")
 
 
