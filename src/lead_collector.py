@@ -2,13 +2,10 @@ from pathlib import Path
 import csv
 from datetime import datetime, timezone
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 DATA_DIR = BASE_DIR / "data"
 LEADS_FILE = DATA_DIR / "leads.csv"
 INPUT_FILE = DATA_DIR / "public_leads.csv"
-
 
 HEADERS = [
     "name",
@@ -68,7 +65,10 @@ def add_lead(lead):
 
 def load_public_leads():
     if not INPUT_FILE.exists():
+        print(f"Input file not found: {INPUT_FILE}")
         return []
+
+    print(f"Reading input file: {INPUT_FILE}")
 
     with INPUT_FILE.open(
         "r",
@@ -76,6 +76,8 @@ def load_public_leads():
         encoding="utf-8-sig"
     ) as file:
         reader = csv.DictReader(file)
+
+        print(f"CSV columns found: {reader.fieldnames}")
 
         leads = []
 
@@ -85,7 +87,6 @@ def load_public_leads():
                 for key in HEADERS
             }
 
-            # Only accept rows that have a name.
             if lead["name"].strip():
                 leads.append(lead)
 
@@ -100,6 +101,11 @@ def main():
     print(f"Input file: {INPUT_FILE}")
 
     public_leads = load_public_leads()
+
+    print(
+        f"Rows loaded from public_leads.csv: "
+        f"{len(public_leads)}"
+    )
 
     if not public_leads:
         print("No public/authorized leads found.")
@@ -128,7 +134,9 @@ def main():
         add_lead(lead)
         added += 1
 
-    print(f"Added {added} public/authorized lead(s).")
+    print(
+        f"Added {added} public/authorized lead(s)."
+    )
     print("Lead Collector is ready.")
 
 
