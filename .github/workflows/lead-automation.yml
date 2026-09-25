@@ -9,6 +9,10 @@ on:
         default: "1"
         type: string
 
+  # Automatic run
+  schedule:
+    - cron: "0 */6 * * *"
+
 jobs:
   lead-automation:
     runs-on: ubuntu-latest
@@ -31,7 +35,8 @@ jobs:
       - name: Show automation settings
         run: |
           echo "Lead Automation Started"
-          echo "Duration: ${{ inputs.duration_minutes }} minutes"
+          echo "Manual Duration: ${{ inputs.duration_minutes }} minutes"
+          echo "YouTube API integration enabled"
 
       - name: Prepare workspace
         run: |
@@ -41,13 +46,18 @@ jobs:
       - name: Run Lead Collector
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           python src/lead_collector.py
 
       - name: Show leads database
         run: |
           echo "Current leads.csv:"
-          cat data/leads.csv
+          if [ -f data/leads.csv ]; then
+            cat data/leads.csv
+          else
+            echo "data/leads.csv not found."
+          fi
 
       - name: Finish
         run: |
