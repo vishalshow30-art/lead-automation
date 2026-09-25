@@ -1,11 +1,23 @@
 from pathlib import Path
 import csv
+import json
+import os
 from datetime import datetime, timezone
+
+import gspread
+from google.oauth2.service_account import Credentials
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+
 LEADS_FILE = DATA_DIR / "leads.csv"
 INPUT_FILE = DATA_DIR / "public_leads.csv"
+
+GOOGLE_SHEET_NAME = os.getenv(
+    "GOOGLE_SHEET_NAME",
+    "Lead Automation"
+)
 
 HEADERS = [
     "name",
@@ -44,7 +56,7 @@ def ensure_csv():
             writer.writerow(HEADERS)
 
 
-def add_lead(lead):
+def add_lead_to_csv(lead):
     ensure_csv()
 
     with LEADS_FILE.open(
@@ -75,6 +87,7 @@ def load_public_leads():
         newline="",
         encoding="utf-8-sig"
     ) as file:
+
         reader = csv.DictReader(file)
 
         print(f"CSV columns found: {reader.fieldnames}")
@@ -91,6 +104,157 @@ def load_public_leads():
                 leads.append(lead)
 
         return leads
+
+
+def connect_google_sheet():
+    secret = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+
+    if not secret:
+        print(
+            "GOOGLE_SERVICE_ACCOUNT_JSON secret not found."
+        )
+        return None
+
+    try:
+        service_account_info = json.loads(secret)
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+
+        credentials = Credentials.from_service_account_info(
+            service_account_info,
+            scopes=scopes
+        )
+
+        client = gspread.authorize(credentials)
+
+        spreadsheet = client.open(GOOGLE_SHEET_NAME)
+
+        try:
+            worksheet = spreadsheet.worksheet("Leads")
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(
+                title="Leads",
+                rows=1000,
+                cols=len(HEADERS)
+            )
+
+            worksheet.append_row(HEADERS)
+
+        print(
+            f"Connected to Google Sheet: {GOOGLE_SHEET_NAME}"
+        )
+
+        return worksheet
+
+    except Exception as error:
+        print(
+            f"Google Sheets connection failed: {error}"
+        )
+        return None
+
+
+def lead_exists_in_sheet(worksheet, lead):
+    if worksheet is None:
+        return False
+
+    try:
+        records = worksheet.get_all_records()
+
+        profile_url = lead.get(
+            "profile_url",
+            ""
+        ).strip()
+
+        channel_url = lead.get(
+            "channel_url",
+            ""
+        ).strip()
+
+        for record in records:
+            existing_profile = str(
+                record.get("profile_url", "")
+            ).strip()
+
+            existing_channel = str(
+                record.get("channel_url", "")
+            ).strip()
+
+            if profile_url and profile_url == existing_profile:
+                return True
+
+            if channel_url and channel_url == existing_channel:
+                return True
+
+        return False
+
+    except Exception as error:
+        print(
+            f"Duplicate check failed: {error}"
+        )
+        return False
+
+
+def add_lead_to_sheet(worksheet, lead):
+    if worksheet is None:
+        return False
+
+    try:
+        if lead_exists_in_sheet(
+            worksheet,
+            lead
+        ):
+            print(
+                f"Duplicate skipped: "
+                f"{lead.get('name', '')}"
+            )
+            return False
+
+        row = [
+            str(lead.get(key, "")).strip()
+            for key in HEADERS
+        ]
+
+        worksheet.append_row(
+            row,
+            value_input_option="USER_ENTERED"
+        )
+
+        print(
+            f"Added to Google Sheets: "
+            f"{lead.get('name', '')}"
+        )
+
+        return True
+
+    except Exception as error:
+        print(
+            f"Failed to add lead to Google Sheets: "
+            f"{error}"
+        )
+        return False
+
+
+def prepare_lead(lead):
+    lead["lead_source"] = (
+        lead.get("lead_source", "").strip()
+        or "public_authorized_source"
+    )
+
+    lead["status"] = (
+        lead.get("status", "").strip()
+        or "new"
+    )
+
+    if not lead.get("recent_upload", "").strip():
+        lead["recent_upload"] = (
+            datetime.now(timezone.utc)
+            .strftime("%Y-%m-%d")
+        )
+
+    return lead
 
 
 def main():
@@ -112,32 +276,33 @@ def main():
         print("Lead Collector is ready.")
         return
 
-    added = 0
+    worksheet = connect_google_sheet()
+
+    csv_added = 0
+    sheet_added = 0
 
     for lead in public_leads:
-        lead["lead_source"] = (
-            lead["lead_source"].strip()
-            or "public_authorized_source"
-        )
+        lead = prepare_lead(lead)
 
-        lead["status"] = (
-            lead["status"].strip()
-            or "new"
-        )
+        add_lead_to_csv(lead)
+        csv_added += 1
 
-        if not lead["recent_upload"].strip():
-            lead["recent_upload"] = (
-                datetime.now(timezone.utc)
-                .strftime("%Y-%m-%d")
-            )
-
-        add_lead(lead)
-        added += 1
+        if worksheet is not None:
+            if add_lead_to_sheet(
+                worksheet,
+                lead
+            ):
+                sheet_added += 1
 
     print(
-        f"Added {added} public/authorized lead(s)."
+        f"Added {csv_added} lead(s) to CSV."
     )
-    print("Lead Collector is ready.")
+
+    print(
+        f"Added {sheet_added} new lead(s) to Google Sheets."
+    )
+
+    print("Lead Collector completed.")
 
 
 if __name__ == "__main__":
