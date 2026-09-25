@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
       - name: Show automation settings
         run: |
           echo "Lead Automation Started"
@@ -34,6 +39,8 @@ jobs:
           echo "Workspace ready."
 
       - name: Run Lead Collector
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           python src/lead_collector.py
 
