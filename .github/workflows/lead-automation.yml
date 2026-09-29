@@ -2,27 +2,18 @@ name: Lead Automation
 
 on:
   workflow_dispatch:
-    inputs:
-      duration_minutes:
-        description: "How long should the automation run?"
-        required: true
-        default: "1"
-        type: string
-
-  # Automatic run every 6 hours
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 0 * * *"
 
 jobs:
   lead-automation:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -32,53 +23,44 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Show automation settings
-        run: |
-          echo "Lead Automation Started"
-          echo "Manual Duration: ${{ inputs.duration_minutes }} minutes"
-          echo "YouTube API integration enabled"
-
-      - name: Prepare workspace
-        run: |
-          mkdir -p data
-          echo "Workspace ready."
-
-      - name: Check API secrets
+      - name: Check Secrets
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
         run: |
-          if [ -n "$YOUTUBE_API_KEY" ]; then
-            echo "YouTube API key is available."
-          else
-            echo "ERROR: YouTube API key is missing."
+          if [ -z "$YOUTUBE_API_KEY" ]; then
+            echo "ERROR: YOUTUBE_API_KEY is missing."
             exit 1
           fi
 
-          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
-            echo "Google service account secret is available."
-          else
-            echo "ERROR: Google service account secret is missing."
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON is missing."
             exit 1
           fi
+
+          if [ -z "$GOOGLE_SHEET_ID" ]; then
+            echo "ERROR: GOOGLE_SHEET_ID is missing."
+            exit 1
+          fi
+
+          echo "YouTube API key is available."
+          echo "Google service account secret is available."
+          echo "Google Sheet ID is available."
 
       - name: Run Lead Collector
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
         run: |
           python src/lead_collector.py
 
-      - name: Show leads database
+      - name: Show Current Leads
         run: |
           echo "Current leads.csv:"
-
           if [ -f data/leads.csv ]; then
             cat data/leads.csv
           else
             echo "data/leads.csv not found."
           fi
-
-      - name: Finish
-        run: |
-          echo "Lead Automation completed successfully."
