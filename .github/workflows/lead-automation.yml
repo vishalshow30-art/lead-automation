@@ -9,7 +9,7 @@ on:
         default: "1"
         type: string
 
-  # Automatic run
+  # Automatic run every 6 hours
   schedule:
     - cron: "0 */6 * * *"
 
@@ -43,6 +43,25 @@ jobs:
           mkdir -p data
           echo "Workspace ready."
 
+      - name: Check API secrets
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          if [ -n "$YOUTUBE_API_KEY" ]; then
+            echo "YouTube API key is available."
+          else
+            echo "ERROR: YouTube API key is missing."
+            exit 1
+          fi
+
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Google service account secret is available."
+          else
+            echo "ERROR: Google service account secret is missing."
+            exit 1
+          fi
+
       - name: Run Lead Collector
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
@@ -53,6 +72,7 @@ jobs:
       - name: Show leads database
         run: |
           echo "Current leads.csv:"
+
           if [ -f data/leads.csv ]; then
             cat data/leads.csv
           else
@@ -61,4 +81,4 @@ jobs:
 
       - name: Finish
         run: |
-          echo "Lead Automation completed."
+          echo "Lead Automation completed successfully."
