@@ -12,7 +12,7 @@ except ImportError:
 
 
 # ============================================================
-# PROJECT PATHS
+# PROJECT
 # ============================================================
 
 def get_project_root() -> Path:
@@ -31,7 +31,7 @@ DATA_FILE = DATA_DIR / "leads.csv"
 
 
 # ============================================================
-# CSV HEADERS
+# CSV
 # ============================================================
 
 CSV_HEADERS = [
@@ -50,30 +50,7 @@ CSV_HEADERS = [
 
 
 # ============================================================
-# TARGET NICHES
-# ============================================================
-
-NICHES = [
-    "Gaming",
-    "Tech",
-    "Gadgets",
-    "PC Computer",
-    "Mobile",
-    "Lifestyle",
-    "Education",
-    "Entertainment",
-    "Fitness",
-    "Fashion",
-    "Travel",
-    "Finance",
-    "Automotive",
-    "Comedy",
-    "Vlogging",
-]
-
-
-# ============================================================
-# YOUTUBE SEARCH TERMS
+# SEARCH TERMS
 # ============================================================
 
 SEARCH_TERMS = [
@@ -92,22 +69,19 @@ SEARCH_TERMS = [
     "Indian automotive creator",
     "Indian comedy creator",
     "Indian vlogger",
-    "Indian video creator",
     "Indian content creator",
-    "Indian influencer",
+    "Indian video creator",
     "Indian YouTuber",
+    "Indian influencer",
 ]
 
 
 # ============================================================
-# FILE HELPERS
+# FILE FUNCTIONS
 # ============================================================
 
 def ensure_leads_file() -> None:
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DATA_FILE.exists():
         with DATA_FILE.open(
@@ -115,12 +89,10 @@ def ensure_leads_file() -> None:
             newline="",
             encoding="utf-8",
         ) as file:
-
             writer = csv.DictWriter(
                 file,
                 fieldnames=CSV_HEADERS,
             )
-
             writer.writeheader()
 
         print(f"Created: {DATA_FILE}")
@@ -137,40 +109,28 @@ def load_existing_leads() -> List[Dict[str, str]]:
             newline="",
             encoding="utf-8",
         ) as file:
-
             reader = csv.DictReader(file)
 
             for row in reader:
                 leads.append({
-                    header: (
-                        row.get(header) or ""
-                    ).strip()
+                    header: (row.get(header) or "").strip()
                     for header in CSV_HEADERS
                 })
 
     except Exception as exc:
-        print(
-            f"Could not read existing leads: {exc}"
-        )
+        print(f"Could not read leads.csv: {exc}")
 
     return leads
 
 
-def save_leads(
-    leads: List[Dict[str, str]]
-) -> None:
-
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+def save_leads(leads: List[Dict[str, str]]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     with DATA_FILE.open(
         "w",
         newline="",
         encoding="utf-8",
     ) as file:
-
         writer = csv.DictWriter(
             file,
             fieldnames=CSV_HEADERS,
@@ -180,10 +140,7 @@ def save_leads(
 
         for lead in leads:
             writer.writerow({
-                header: lead.get(
-                    header,
-                    "",
-                )
+                header: lead.get(header, "")
                 for header in CSV_HEADERS
             })
 
@@ -196,30 +153,18 @@ def clean_text(value: str) -> str:
     if not value:
         return ""
 
-    value = value.replace(
-        "\n",
-        " ",
-    )
-
-    value = re.sub(
-        r"\s+",
-        " ",
-        value,
-    )
+    value = value.replace("\n", " ")
+    value = re.sub(r"\s+", " ", value)
 
     return value.strip()
 
 
 def normalize_url(url: str) -> str:
-    return (
-        url.strip()
-        .lower()
-        .rstrip("/")
-    )
+    return url.strip().lower().rstrip("/")
 
 
 # ============================================================
-# DUPLICATE PROTECTION
+# DUPLICATE CHECK
 # ============================================================
 
 def lead_exists(
@@ -228,49 +173,32 @@ def lead_exists(
     name: str,
 ) -> bool:
 
-    normalized_url = normalize_url(
-        channel_url
-    )
-
-    normalized_name = (
-        name.strip().lower()
-    )
+    new_url = normalize_url(channel_url)
+    new_name = name.strip().lower()
 
     for lead in existing_leads:
 
         old_url = normalize_url(
-            lead.get(
-                "channel_url",
-                "",
-            )
+            lead.get("channel_url", "")
         )
 
         old_name = (
-            lead.get(
-                "name",
-                "",
-            )
+            lead.get("name", "")
             .strip()
             .lower()
         )
 
-        if (
-            normalized_url
-            and old_url == normalized_url
-        ):
+        if new_url and new_url == old_url:
             return True
 
-        if (
-            normalized_name
-            and old_name == normalized_name
-        ):
+        if new_name and new_name == old_name:
             return True
 
     return False
 
 
 # ============================================================
-# NICHE DETECTION
+# NICHE
 # ============================================================
 
 def detect_niche(
@@ -278,90 +206,74 @@ def detect_niche(
     description: str,
 ) -> str:
 
-    text = (
-        f"{title} {description}"
-    ).lower()
+    text = f"{title} {description}".lower()
 
-    niche_keywords = {
-
+    keywords = {
         "Gaming": [
             "gaming",
             "gamer",
             "gameplay",
             "esports",
         ],
-
         "Tech": [
-            "technology",
             "tech",
+            "technology",
             "smartphone",
             "computer",
         ],
-
         "Gadgets": [
-            "gadgets",
             "gadget",
-            "devices",
+            "gadgets",
+            "device",
             "accessories",
         ],
-
         "PC Computer": [
             "pc",
-            "computer",
             "laptop",
             "desktop",
+            "computer",
         ],
-
         "Mobile": [
             "mobile",
             "android",
             "iphone",
             "ios",
         ],
-
         "Lifestyle": [
             "lifestyle",
             "daily life",
         ],
-
         "Education": [
             "education",
-            "educational",
             "study",
             "learning",
         ],
-
         "Entertainment": [
             "entertainment",
             "movies",
             "music",
         ],
-
         "Fitness": [
             "fitness",
             "workout",
             "gym",
         ],
-
         "Fashion": [
             "fashion",
             "style",
             "outfit",
         ],
-
         "Travel": [
             "travel",
             "tour",
             "trip",
         ],
-
         "Finance": [
             "finance",
             "investment",
             "investing",
-            "stock market",
+            "stock",
         ],
-
         "Automotive": [
             "automotive",
             "car",
@@ -369,33 +281,28 @@ def detect_niche(
             "bike",
             "automobile",
         ],
-
         "Comedy": [
             "comedy",
             "funny",
             "humor",
             "standup",
         ],
-
         "Vlogging": [
             "vlog",
             "vlogger",
-            "daily vlog",
         ],
     }
 
-    for niche, keywords in niche_keywords.items():
-
-        for keyword in keywords:
-
-            if keyword in text:
+    for niche, words in keywords.items():
+        for word in words:
+            if word in text:
                 return niche
 
     return ""
 
 
 # ============================================================
-# COUNTRY DETECTION
+# COUNTRY
 # ============================================================
 
 def detect_country(
@@ -403,9 +310,7 @@ def detect_country(
     description: str,
 ) -> str:
 
-    text = (
-        f"{title} {description}"
-    ).lower()
+    text = f"{title} {description}".lower()
 
     india_terms = [
         "india",
@@ -423,29 +328,23 @@ def detect_country(
         "uttar pradesh",
     ]
 
-    if any(
-        term in text
-        for term in india_terms
-    ):
-        return "India"
+    for term in india_terms:
+        if term in text:
+            return "India"
 
     return ""
 
 
 # ============================================================
-# YOUTUBE SERVICE
+# YOUTUBE API
 # ============================================================
 
 def get_youtube_service():
 
-    api_key = os.getenv(
-        "YOUTUBE_API_KEY"
-    )
+    api_key = os.getenv("YOUTUBE_API_KEY")
 
     if not api_key:
-        print(
-            "YOUTUBE_API_KEY not found."
-        )
+        print("YOUTUBE_API_KEY is missing.")
         return None
 
     if build is None:
@@ -455,19 +354,15 @@ def get_youtube_service():
         return None
 
     try:
-
         return build(
             "youtube",
             "v3",
             developerKey=api_key,
         )
-
     except Exception as exc:
-
         print(
-            f"Could not create YouTube client: {exc}"
+            f"YouTube client error: {exc}"
         )
-
         return None
 
 
@@ -484,7 +379,6 @@ def search_youtube_channels(
     results = []
 
     try:
-
         response = (
             youtube.search()
             .list(
@@ -497,47 +391,27 @@ def search_youtube_channels(
         )
 
     except Exception as exc:
-
         print(
-            f"YouTube search failed for "
-            f"'{search_term}': {exc}"
+            f"YouTube search failed: {search_term}"
         )
-
+        print(exc)
         return results
 
-    for item in response.get(
-        "items",
-        [],
-    ):
+    for item in response.get("items", []):
 
         channel_id = (
-            item.get(
-                "id",
-                {},
-            )
-            .get(
-                "channelId",
-                "",
-            )
+            item.get("id", {})
+            .get("channelId", "")
         )
 
-        snippet = item.get(
-            "snippet",
-            {},
-        )
+        snippet = item.get("snippet", {})
 
         title = clean_text(
-            snippet.get(
-                "title",
-                "",
-            )
+            snippet.get("title", "")
         )
 
         description = clean_text(
-            snippet.get(
-                "description",
-                "",
-            )
+            snippet.get("description", "")
         )
 
         if not channel_id or not title:
@@ -557,7 +431,7 @@ def search_youtube_channels(
 
 
 # ============================================================
-# YOUTUBE CHANNEL DETAILS
+# YOUTUBE DETAILS
 # ============================================================
 
 def get_youtube_channel_details(
@@ -568,7 +442,7 @@ def get_youtube_channel_details(
     if not channel_ids:
         return []
 
-    details = []
+    results = []
 
     for start in range(
         0,
@@ -576,12 +450,9 @@ def get_youtube_channel_details(
         50,
     ):
 
-        batch = channel_ids[
-            start:start + 50
-        ]
+        batch = channel_ids[start:start + 50]
 
         try:
-
             response = (
                 youtube.channels()
                 .list(
@@ -592,40 +463,17 @@ def get_youtube_channel_details(
             )
 
         except Exception as exc:
-
             print(
-                f"YouTube channel details failed: {exc}"
+                f"YouTube details error: {exc}"
             )
-
             continue
 
-        for item in response.get(
-            "items",
-            [],
-        ):
+        for item in response.get("items", []):
 
-            snippet = item.get(
-                "snippet",
-                {},
-            )
-
+            snippet = item.get("snippet", {})
             statistics = item.get(
                 "statistics",
                 {},
-            )
-
-            title = clean_text(
-                snippet.get(
-                    "title",
-                    "",
-                )
-            )
-
-            description = clean_text(
-                snippet.get(
-                    "description",
-                    "",
-                )
             )
 
             channel_id = item.get(
@@ -633,24 +481,27 @@ def get_youtube_channel_details(
                 "",
             )
 
+            title = clean_text(
+                snippet.get("title", "")
+            )
+
+            description = clean_text(
+                snippet.get("description", "")
+            )
+
             subscribers = statistics.get(
                 "subscriberCount",
                 "",
             )
 
-            hidden_subscribers = statistics.get(
+            if statistics.get(
                 "hiddenSubscriberCount",
                 False,
-            )
-
-            if hidden_subscribers:
+            ):
                 subscribers = ""
 
             country = clean_text(
-                snippet.get(
-                    "country",
-                    "",
-                )
+                snippet.get("country", "")
             )
 
             if not country:
@@ -659,7 +510,7 @@ def get_youtube_channel_details(
                     description,
                 )
 
-            lead = {
+            results.append({
                 "name": title,
                 "platform": "YouTube",
                 "channel_url": (
@@ -680,15 +531,13 @@ def get_youtube_channel_details(
                     "Collected from public "
                     "YouTube channel information."
                 ),
-            }
+            })
 
-            details.append(lead)
-
-    return details
+    return results
 
 
 # ============================================================
-# SUBSCRIBER FILTER
+# TARGET FILTER
 # ============================================================
 
 def subscriber_in_target_range(
@@ -699,33 +548,18 @@ def subscriber_in_target_range(
         return False
 
     try:
-
-        count = int(
-            subscriber_count
-        )
-
+        count = int(subscriber_count)
     except ValueError:
-
         return False
 
-    return (
-        10_000
-        <= count
-        <= 50_000
-    )
+    return 10000 <= count <= 50000
 
 
 def is_relevant_lead(
-    lead: Dict[str, str]
+    lead: Dict[str, str],
 ) -> bool:
 
-    platform = lead.get(
-        "platform",
-        "",
-    )
-
-    if platform == "YouTube":
-
+    if lead.get("platform") == "YouTube":
         return subscriber_in_target_range(
             lead.get(
                 "subscriber_count",
@@ -737,126 +571,7 @@ def is_relevant_lead(
 
 
 # ============================================================
-# PUBLIC BUSINESS EMAIL CHECK
-# ============================================================
-
-def looks_like_business_email(
-    email: str
-) -> bool:
-
-    if not email:
-        return False
-
-    pattern = (
-        r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
-    )
-
-    return bool(
-        re.match(
-            pattern,
-            email.strip(),
-        )
-    )
-
-
-def add_public_contact(
-    lead: Dict[str, str],
-    email: str = "",
-    website: str = "",
-) -> Dict[str, str]:
-
-    """
-    Add contact information only when it comes
-    from an authorized/public source.
-    """
-
-    if email and looks_like_business_email(email):
-
-        lead["business_email"] = (
-            email.strip()
-        )
-
-    if website:
-
-        lead["website"] = (
-            website.strip()
-        )
-
-    return lead
-
-
-# ============================================================
-# INSTAGRAM
-# ============================================================
-
-def collect_instagram_leads():
-
-    print(
-        "Instagram: authorized API not configured. "
-        "Skipping."
-    )
-
-    return []
-
-
-# ============================================================
-# FACEBOOK
-# ============================================================
-
-def collect_facebook_leads():
-
-    print(
-        "Facebook: authorized API not configured. "
-        "Skipping."
-    )
-
-    return []
-
-
-# ============================================================
-# X / TWITTER
-# ============================================================
-
-def collect_x_leads():
-
-    print(
-        "X/Twitter: authorized API not configured. "
-        "Skipping."
-    )
-
-    return []
-
-
-# ============================================================
-# LINKEDIN
-# ============================================================
-
-def collect_linkedin_leads():
-
-    print(
-        "LinkedIn: authorized API not configured. "
-        "Skipping."
-    )
-
-    return []
-
-
-# ============================================================
-# WEBSITES
-# ============================================================
-
-def collect_website_leads():
-
-    print(
-        "Websites: authorized search source "
-        "not configured. Skipping."
-    )
-
-    return []
-
-
-# ============================================================
-# YOUTUBE LEAD COLLECTION
+# YOUTUBE COLLECTOR
 # ============================================================
 
 def collect_youtube_leads(
@@ -868,42 +583,35 @@ def collect_youtube_leads(
     if youtube is None:
         return []
 
-    discovered = []
+    new_leads = []
 
-    print(
-        "Starting YouTube discovery..."
-    )
+    print("Starting YouTube discovery...")
 
     for search_term in SEARCH_TERMS:
 
         print(
-            f"Searching YouTube: {search_term}"
+            f"Searching: {search_term}"
         )
 
         channels = search_youtube_channels(
             youtube,
             search_term,
-            max_results=25,
+            25,
         )
 
         channel_ids = [
             channel["channel_id"]
             for channel in channels
-            if channel.get("channel_id")
         ]
 
-        channel_details = (
-            get_youtube_channel_details(
-                youtube,
-                channel_ids,
-            )
+        details = get_youtube_channel_details(
+            youtube,
+            channel_ids,
         )
 
-        for lead in channel_details:
+        for lead in details:
 
-            if not is_relevant_lead(
-                lead
-            ):
+            if not is_relevant_lead(lead):
                 continue
 
             if lead_exists(
@@ -913,85 +621,102 @@ def collect_youtube_leads(
             ):
                 continue
 
-            duplicate = any(
-                normalize_url(
-                    existing.get(
-                        "channel_url",
-                        "",
-                    )
-                )
-                == normalize_url(
-                    lead["channel_url"]
-                )
-                for existing in discovered
-            )
-
-            if duplicate:
+            if lead_exists(
+                new_leads,
+                lead["channel_url"],
+                lead["name"],
+            ):
                 continue
 
-            discovered.append(
-                lead
-            )
+            new_leads.append(lead)
 
         time.sleep(1)
 
     print(
         f"New YouTube leads found: "
-        f"{len(discovered)}"
+        f"{len(new_leads)}"
     )
 
-    return discovered
+    return new_leads
 
 
 # ============================================================
-# ALL PLATFORM COLLECTION
+# OTHER PLATFORMS
+# ============================================================
+
+def collect_instagram_leads():
+    print(
+        "Instagram: authorized API not configured."
+    )
+    return []
+
+
+def collect_facebook_leads():
+    print(
+        "Facebook: authorized API not configured."
+    )
+    return []
+
+
+def collect_x_leads():
+    print(
+        "X/Twitter: authorized API not configured."
+    )
+    return []
+
+
+def collect_linkedin_leads():
+    print(
+        "LinkedIn: authorized API not configured."
+    )
+    return []
+
+
+def collect_website_leads():
+    print(
+        "Websites: authorized search source "
+        "not configured."
+    )
+    return []
+
+
+# ============================================================
+# ALL SOURCES
 # ============================================================
 
 def collect_all_leads(
     existing_leads: List[Dict[str, str]],
 ) -> List[Dict[str, str]]:
 
-    all_new_leads = []
+    all_leads = []
 
-    print(
-        "Collecting leads from configured sources..."
+    all_leads.extend(
+        collect_youtube_leads(
+            existing_leads
+        )
     )
 
-    # YouTube
-    youtube_leads = collect_youtube_leads(
-        existing_leads
-    )
-
-    all_new_leads.extend(
-        youtube_leads
-    )
-
-    # Instagram
-    all_new_leads.extend(
+    all_leads.extend(
         collect_instagram_leads()
     )
 
-    # Facebook
-    all_new_leads.extend(
+    all_leads.extend(
         collect_facebook_leads()
     )
 
-    # X
-    all_new_leads.extend(
+    all_leads.extend(
         collect_x_leads()
     )
 
-    # LinkedIn
-    all_new_leads.extend(
+    all_leads.extend(
         collect_linkedin_leads()
     )
 
-    # Websites
-    all_new_leads.extend(
+    all_leads.extend(
         collect_website_leads()
     )
 
-    return all_new_leads
+    return all_leads
 
 
 # ============================================================
@@ -1014,9 +739,7 @@ def main() -> None:
 
     ensure_leads_file()
 
-    existing_leads = (
-        load_existing_leads()
-    )
+    existing_leads = load_existing_leads()
 
     print(
         f"Existing leads: "
@@ -1029,10 +752,31 @@ def main() -> None:
 
     if new_leads:
 
-        existing_leads.extend(
-            new_leads
+        existing_leads.extend(new_leads)
+
+        save_leads(existing_leads)
+
+        print(
+            f"Added {len(new_leads)} "
+            f"new leads."
         )
 
-        save_leads(
-            existing_leads
-        
+    else:
+
+        print(
+            "No new leads collected "
+            "in this cycle."
+        )
+
+    print(
+        f"Total leads in CSV: "
+        f"{len(existing_leads)}"
+    )
+
+    print("=" * 60)
+    print("LEAD AUTOMATION COMPLETED")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
