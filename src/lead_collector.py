@@ -1,376 +1,221 @@
-import os
-import csv
-import json
-import time
 from pathlib import Path
-from typing import Dict, List, Set, Optional
+import csv
+import os
+import re
+import time
+from typing import Dict, List
 
-import requests
-import gspread
-from google.oauth2.service_account import Credentials
-
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-
-LEADS_FILE = DATA_DIR / "leads.csv"
-PUBLIC_LEADS_FILE = DATA_DIR / "public_leads.csv"
-
-# Google
-GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv(
-    "GOOGLE_SERVICE_ACCOUNT_JSON", ""
-).strip()
-
-GOOGLE_SHEET_ID = os.getenv(
-    "GOOGLE_SHEET_ID", ""
-).strip()
-
-GOOGLE_SHEET_NAME = os.getenv(
-    "GOOGLE_SHEET_NAME", "Lead Automation"
-).strip()
-
-# YouTube
-YOUTUBE_API_KEY = os.getenv(
-    "YOUTUBE_API_KEY", ""
-).strip()
-
-# Lead filters
-MIN_SUBSCRIBERS = int(
-    os.getenv("MIN_SUBSCRIBERS", "10000")
-)
-
-MAX_SUBSCRIBERS = int(
-    os.getenv("MAX_SUBSCRIBERS", "50000")
-)
-
-SEARCH_RESULTS_PER_QUERY = int(
-    os.getenv("SEARCH_RESULTS_PER_QUERY", "50")
-)
-
-MAX_CHANNELS_PER_RUN = int(
-    os.getenv("MAX_CHANNELS_PER_RUN", "200")
-)
+try:
+    from googleapiclient.discovery import build
+except ImportError:
+    build = None
 
 
 # ============================================================
-# CSV COLUMNS
+# PROJECT PATHS
 # ============================================================
 
-CSV_COLUMNS = [
+def get_project_root() -> Path:
+    current = Path(__file__).resolve()
+
+    for parent in current.parents:
+        if (parent / "requirements.txt").exists():
+            return parent
+
+    return current.parent.parent
+
+
+PROJECT_ROOT = get_project_root()
+DATA_DIR = PROJECT_ROOT / "data"
+DATA_FILE = DATA_DIR / "leads.csv"
+
+
+# ============================================================
+# CSV STRUCTURE
+# ============================================================
+
+CSV_HEADERS = [
     "name",
     "platform",
-    "profile_url",
     "channel_url",
-    "creator_or_business",
+    "subscriber_count",
     "niche",
     "country",
-    "city",
-    "subscribers",
-    "avg_views",
+    "contact_email",
     "business_email",
-    "instagram",
-    "linkedin",
-    "twitter_x",
     "website",
-    "recent_upload",
-    "contact_type",
-    "lead_source",
-    "status",
+    "instagram_url",
     "notes",
 ]
 
 
 # ============================================================
-# YOUTUBE SEARCH QUERIES
+# TARGET NICHES
 # ============================================================
 
-YOUTUBE_QUERIES = [
-    "tech",
-    "technology",
-    "gadgets",
-    "smartphone",
-    "mobile",
-    "android",
-    "iPhone",
-    "PC",
-    "computer",
-    "laptop",
-    "gaming",
-    "gaming PC",
-    "PC build",
-    "graphics card",
-    "GPU",
-    "video editing",
-    "Premiere Pro",
-    "CapCut",
-    "creator",
-    "YouTuber",
-    "content creator",
-    "camera",
-    "photography",
-    "videography",
-    "VFX",
-    "3D",
+NICHES = [
+    "Gaming",
+    "Tech",
+    "Gadgets",
+    "PC Computer",
+    "Mobile",
+    "Lifestyle",
+    "Education",
+    "Entertainment",
+    "Fitness",
+    "Fashion",
+    "Travel",
+    "Finance",
+    "Automotive",
+    "Comedy",
+    "Vlogging",
 ]
 
 
 # ============================================================
-# GENERAL HELPERS
+# YOUTUBE SEARCH TERMS
 # ============================================================
 
-def safe_int(value, default=0):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+SEARCH_TERMS = [
+    "Indian gaming creator",
+    "Indian tech creator",
+    "Indian gadgets creator",
+    "Indian PC creator",
+    "Indian mobile creator",
+    "Indian lifestyle creator",
+    "Indian education creator",
+    "Indian entertainment creator",
+    "Indian fitness creator",
+    "Indian fashion creator",
+    "Indian travel creator",
+    "Indian finance creator",
+    "Indian automotive creator",
+    "Indian comedy creator",
+    "Indian vlogger",
+    "Indian video creator",
+    "Indian content creator",
+    "Indian influencer",
+]
 
 
-def clean(value) -> str:
-    if value is None:
-        return ""
+# ============================================================
+# FILE HELPERS
+# ============================================================
 
-    return str(value).strip()
+def ensure_leads_file() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def normalize_url(url: str) -> str:
-    url = clean(url)
-
-    if not url:
-        return ""
-
-    return url.rstrip("/")
-
-
-def channel_url(channel_id: str) -> str:
-    return f"https://www.youtube.com/channel/{channel_id}"
-
-
-def ensure_data_dir():
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-
-def create_empty_csv_if_needed():
-    ensure_data_dir()
-
-    if not LEADS_FILE.exists():
-        with LEADS_FILE.open(
+    if not DATA_FILE.exists():
+        with DATA_FILE.open(
             "w",
             newline="",
-            encoding="utf-8"
-        ) as f:
-
+            encoding="utf-8",
+        ) as file:
             writer = csv.DictWriter(
-                f,
-                fieldnames=CSV_COLUMNS
+                file,
+                fieldnames=CSV_HEADERS,
             )
-
             writer.writeheader()
 
+        print(f"Created: {DATA_FILE}")
 
-# ============================================================
-# CSV FUNCTIONS
-# ============================================================
 
-def read_csv_file(path: Path) -> List[Dict]:
-    if not path.exists():
-        return []
+def load_existing_leads() -> List[Dict[str, str]]:
+    ensure_leads_file()
 
-    rows = []
+    leads = []
 
     try:
-        with path.open(
+        with DATA_FILE.open(
             "r",
             newline="",
-            encoding="utf-8-sig"
-        ) as f:
-
-            reader = csv.DictReader(f)
+            encoding="utf-8",
+        ) as file:
+            reader = csv.DictReader(file)
 
             for row in reader:
-                cleaned = {
-                    column: clean(
-                        row.get(column, "")
-                    )
-                    for column in CSV_COLUMNS
-                }
+                leads.append({
+                    header: (row.get(header) or "").strip()
+                    for header in CSV_HEADERS
+                })
 
-                rows.append(cleaned)
+    except Exception as exc:
+        print(f"Could not read existing leads: {exc}")
 
-    except Exception as e:
-        print(
-            f"CSV read error ({path}): {e}"
-        )
-
-    return rows
+    return leads
 
 
-def append_rows_to_csv(rows: List[Dict]):
-    if not rows:
-        return
+def save_leads(leads: List[Dict[str, str]]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    ensure_data_dir()
-
-    file_exists = LEADS_FILE.exists()
-    file_empty = (
-        not file_exists
-        or LEADS_FILE.stat().st_size == 0
-    )
-
-    with LEADS_FILE.open(
-        "a",
+    with DATA_FILE.open(
+        "w",
         newline="",
-        encoding="utf-8"
-    ) as f:
-
+        encoding="utf-8",
+    ) as file:
         writer = csv.DictWriter(
-            f,
-            fieldnames=CSV_COLUMNS
+            file,
+            fieldnames=CSV_HEADERS,
         )
 
-        if file_empty:
-            writer.writeheader()
+        writer.writeheader()
 
-        for row in rows:
+        for lead in leads:
             writer.writerow({
-                column: clean(
-                    row.get(column, "")
-                )
-                for column in CSV_COLUMNS
+                header: lead.get(header, "")
+                for header in CSV_HEADERS
             })
 
 
 # ============================================================
-# DUPLICATE SYSTEM
+# TEXT / URL CLEANING
 # ============================================================
 
-def build_duplicate_keys(
-    rows: List[Dict]
-) -> Set[str]:
+def clean_text(value: str) -> str:
+    if not value:
+        return ""
 
-    keys = set()
+    value = value.replace("\n", " ")
+    value = re.sub(r"\s+", " ", value)
 
-    for row in rows:
-
-        channel = normalize_url(
-            row.get("channel_url", "")
-        )
-
-        profile = normalize_url(
-            row.get("profile_url", "")
-        )
-
-        name = clean(
-            row.get("name", "")
-        ).lower()
-
-        platform = clean(
-            row.get("platform", "")
-        ).lower()
-
-        if channel:
-            keys.add(
-                f"channel:{channel.lower()}"
-            )
-
-        if profile:
-            keys.add(
-                f"profile:{profile.lower()}"
-            )
-
-        if name and platform:
-            keys.add(
-                f"name:{platform}:{name}"
-            )
-
-    return keys
+    return value.strip()
 
 
-def is_duplicate(
-    row: Dict,
-    existing_keys: Set[str]
+def normalize_url(url: str) -> str:
+    return url.strip().lower().rstrip("/")
+
+
+# ============================================================
+# DUPLICATE PROTECTION
+# ============================================================
+
+def lead_exists(
+    existing_leads: List[Dict[str, str]],
+    channel_url: str,
+    name: str,
 ) -> bool:
 
-    channel = normalize_url(
-        row.get("channel_url", "")
-    )
+    normalized_url = normalize_url(channel_url)
+    normalized_name = name.strip().lower()
 
-    profile = normalize_url(
-        row.get("profile_url", "")
-    )
-
-    name = clean(
-        row.get("name", "")
-    ).lower()
-
-    platform = clean(
-        row.get("platform", "")
-    ).lower()
-
-    possible_keys = []
-
-    if channel:
-        possible_keys.append(
-            f"channel:{channel.lower()}"
+    for lead in existing_leads:
+        old_url = normalize_url(
+            lead.get("channel_url", "")
         )
 
-    if profile:
-        possible_keys.append(
-            f"profile:{profile.lower()}"
+        old_name = (
+            lead.get("name", "")
+            .strip()
+            .lower()
         )
 
-    if name and platform:
-        possible_keys.append(
-            f"name:{platform}:{name}"
-        )
+        if normalized_url and old_url == normalized_url:
+            return True
 
-    return any(
-        key in existing_keys
-        for key in possible_keys
-    )
+        if normalized_name and old_name == normalized_name:
+            return True
 
-
-def add_row_keys(
-    row: Dict,
-    existing_keys: Set[str]
-):
-
-    channel = normalize_url(
-        row.get("channel_url", "")
-    )
-
-    profile = normalize_url(
-        row.get("profile_url", "")
-    )
-
-    name = clean(
-        row.get("name", "")
-    ).lower()
-
-    platform = clean(
-        row.get("platform", "")
-    ).lower()
-
-    if channel:
-        existing_keys.add(
-            f"channel:{channel.lower()}"
-        )
-
-    if profile:
-        existing_keys.add(
-            f"profile:{profile.lower()}"
-        )
-
-    if name and platform:
-        existing_keys.add(
-            f"name:{platform}:{name}"
-        )
+    return False
 
 
 # ============================================================
@@ -379,1086 +224,735 @@ def add_row_keys(
 
 def detect_niche(
     title: str,
-    description: str
+    description: str,
 ) -> str:
 
     text = (
-        f"{clean(title)} "
-        f"{clean(description)}"
+        f"{title} {description}"
     ).lower()
 
-    categories = []
-
-    if any(
-        word in text
-        for word in [
+    niche_keywords = {
+        "Gaming": [
             "gaming",
             "gamer",
-            "gaming pc",
-            "game",
-        ]
-    ):
-        categories.append("gaming")
-
-    if any(
-        word in text
-        for word in [
-            "mobile",
+            "gameplay",
+            "esports",
+        ],
+        "Tech": [
+            "technology",
+            "tech",
             "smartphone",
+            "computer",
+        ],
+        "Gadgets": [
+            "gadgets",
+            "gadget",
+            "devices",
+            "accessories",
+        ],
+        "PC Computer": [
+            "pc",
+            "computer",
+            "laptop",
+            "desktop",
+        ],
+        "Mobile": [
+            "mobile",
             "android",
             "iphone",
-        ]
-    ):
-        categories.append(
-            "mobile/smartphone"
-        )
+            "ios",
+        ],
+        "Lifestyle": [
+            "lifestyle",
+            "daily life",
+            "life style",
+        ],
+        "Education": [
+            "education",
+            "educational",
+            "study",
+            "learning",
+        ],
+        "Entertainment": [
+            "entertainment",
+            "celebrity",
+            "movies",
+            "music",
+        ],
+        "Fitness": [
+            "fitness",
+            "workout",
+            "gym",
+            "health",
+        ],
+        "Fashion": [
+            "fashion",
+            "style",
+            "outfit",
+        ],
+        "Travel": [
+            "travel",
+            "tour",
+            "trip",
+            "vlog",
+        ],
+        "Finance": [
+            "finance",
+            "investment",
+            "investing",
+            "stock market",
+        ],
+        "Automotive": [
+            "automotive",
+            "car",
+            "cars",
+            "bike",
+            "automobile",
+        ],
+        "Comedy": [
+            "comedy",
+            "funny",
+            "humor",
+            "standup",
+        ],
+        "Vlogging": [
+            "vlog",
+            "vlogger",
+            "daily vlog",
+        ],
+    }
+
+    for niche, keywords in niche_keywords.items():
+        for keyword in keywords:
+            if keyword in text:
+                return niche
+
+    return ""
+
+
+# ============================================================
+# COUNTRY DETECTION
+# ============================================================
+
+def detect_country(
+    title: str,
+    description: str,
+) -> str:
+
+    text = (
+        f"{title} {description}"
+    ).lower()
+
+    india_terms = [
+        "india",
+        "indian",
+        "hindi",
+        "bharat",
+        "delhi",
+        "mumbai",
+        "bangalore",
+        "bengaluru",
+        "hyderabad",
+        "pune",
+        "noida",
+        "gurgaon",
+        "ghaziabad",
+        "uttar pradesh",
+    ]
 
     if any(
-        word in text
-        for word in [
-            "laptop",
-            "computer",
-            "pc",
-            "cpu",
-            "gpu",
-            "graphics card",
-        ]
+        term in text
+        for term in india_terms
     ):
-        categories.append(
-            "computers/laptops"
-        )
+        return "India"
 
-    if any(
-        word in text
-        for word in [
-            "camera",
-            "photography",
-            "videography",
-        ]
-    ):
-        categories.append(
-            "photography/videography"
-        )
-
-    if any(
-        word in text
-        for word in [
-            "video editing",
-            "premiere pro",
-            "capcut",
-            "editing",
-        ]
-    ):
-        categories.append(
-            "video editing"
-        )
-
-    if any(
-        word in text
-        for word in [
-            "vfx",
-            "3d",
-            "visual effects",
-        ]
-    ):
-        categories.append(
-            "VFX/3D"
-        )
-
-    if not categories:
-        categories.append("technology")
-
-    unique = list(
-        dict.fromkeys(categories)
-    )
-
-    return ", ".join(
-        unique[:4]
-    )
+    return ""
 
 
 # ============================================================
 # YOUTUBE API
 # ============================================================
 
-YOUTUBE_BASE_URL = (
-    "https://www.googleapis.com/youtube/v3"
-)
+def get_youtube_service():
+    api_key = os.getenv(
+        "YOUTUBE_API_KEY"
+    )
 
-
-def youtube_get(
-    endpoint: str,
-    params: Dict,
-    retries: int = 3
-) -> Optional[Dict]:
-
-    if not YOUTUBE_API_KEY:
+    if not api_key:
         print(
-            "ERROR: YOUTUBE_API_KEY is missing."
+            "YOUTUBE_API_KEY not found. "
+            "Skipping YouTube collection."
         )
         return None
 
-    url = (
-        f"{YOUTUBE_BASE_URL}/{endpoint}"
-    )
+    if build is None:
+        print(
+            "google-api-python-client is not installed. "
+            "Skipping YouTube collection."
+        )
+        return None
 
-    params = dict(params)
-    params["key"] = YOUTUBE_API_KEY
+    try:
+        return build(
+            "youtube",
+            "v3",
+            developerKey=api_key,
+        )
 
-    for attempt in range(
-        1,
-        retries + 1
-    ):
-
-        try:
-
-            response = requests.get(
-                url,
-                params=params,
-                timeout=30
-            )
-
-            if response.status_code == 200:
-                return response.json()
-
-            print(
-                "YouTube API error "
-                f"{response.status_code}: "
-                f"{response.text[:500]}"
-            )
-
-            if response.status_code in {
-                429,
-                500,
-                502,
-                503,
-                504,
-            }:
-
-                if attempt < retries:
-                    time.sleep(
-                        attempt * 2
-                    )
-
-                    continue
-
-            return None
-
-        except requests.RequestException as e:
-
-            print(
-                "YouTube request error "
-                f"(attempt {attempt}): {e}"
-            )
-
-            if attempt < retries:
-                time.sleep(
-                    attempt * 2
-                )
-
-    return None
+    except Exception as exc:
+        print(
+            f"Could not create YouTube client: {exc}"
+        )
+        return None
 
 
 # ============================================================
-# SEARCH CHANNELS
+# YOUTUBE SEARCH
 # ============================================================
 
 def search_youtube_channels(
-    query: str
-) -> List[str]:
+    youtube,
+    search_term: str,
+    max_results: int = 25,
+) -> List[Dict[str, str]]:
 
-    print(
-        f"YouTube search: {query}"
-    )
+    results = []
 
-    data = youtube_get(
-        "search",
-        {
-            "part": "snippet",
-            "q": query,
-            "type": "channel",
-            "regionCode": "IN",
-            "maxResults": min(
-                SEARCH_RESULTS_PER_QUERY,
-                50
-            ),
-        }
-    )
+    try:
+        response = youtube.search().list(
+            part="snippet",
+            q=search_term,
+            type="channel",
+            maxResults=max_results,
+        ).execute()
 
-    if not data:
-        return []
+    except Exception as exc:
+        print(
+            f"YouTube search failed for "
+            f"'{search_term}': {exc}"
+        )
+        return results
 
-    channel_ids = []
-
-    for item in data.get(
+    for item in response.get(
         "items",
-        []
+        [],
     ):
 
         channel_id = (
-            item.get(
-                "snippet",
-                {}
-            ).get(
-                "channelId",
-                ""
-            )
+            item.get("id", {})
+            .get("channelId", "")
         )
 
-        if channel_id:
-            channel_ids.append(
-                channel_id
-            )
+        snippet = item.get(
+            "snippet",
+            {},
+        )
 
-    return channel_ids
+        title = clean_text(
+            snippet.get("title", "")
+        )
+
+        description = clean_text(
+            snippet.get("description", "")
+        )
+
+        if not channel_id or not title:
+            continue
+
+        results.append({
+            "channel_id": channel_id,
+            "name": title,
+            "description": description,
+            "channel_url": (
+                "https://www.youtube.com/channel/"
+                + channel_id
+            ),
+        })
+
+    return results
 
 
 # ============================================================
-# CHANNEL DETAILS
+# YOUTUBE CHANNEL DETAILS
 # ============================================================
 
-def get_channel_details(
-    channel_ids: List[str]
-) -> List[Dict]:
+def get_youtube_channel_details(
+    youtube,
+    channel_ids: List[str],
+) -> List[Dict[str, str]]:
 
     if not channel_ids:
         return []
 
-    results = []
+    details = []
 
-    # YouTube allows max 50 IDs/request
     for start in range(
         0,
         len(channel_ids),
-        50
+        50,
     ):
 
         batch = channel_ids[
             start:start + 50
         ]
 
-        data = youtube_get(
-            "channels",
-            {
-                "part": (
-                    "snippet,"
-                    "statistics,"
-                    "contentDetails"
+        try:
+            response = youtube.channels().list(
+                part="snippet,statistics",
+                id=",".join(batch),
+            ).execute()
+
+        except Exception as exc:
+            print(
+                f"YouTube channel details failed: {exc}"
+            )
+            continue
+
+        for item in response.get(
+            "items",
+            [],
+        ):
+
+            snippet = item.get(
+                "snippet",
+                {},
+            )
+
+            statistics = item.get(
+                "statistics",
+                {},
+            )
+
+            title = clean_text(
+                snippet.get("title", "")
+            )
+
+            description = clean_text(
+                snippet.get("description", "")
+            )
+
+            channel_id = item.get(
+                "id",
+                "",
+            )
+
+            subscribers = statistics.get(
+                "subscriberCount",
+                "",
+            )
+
+            hidden_subscribers = statistics.get(
+                "hiddenSubscriberCount",
+                False,
+            )
+
+            if hidden_subscribers:
+                subscribers = ""
+
+            details.append({
+                "name": title,
+                "platform": "YouTube",
+                "channel_url": (
+                    "https://www.youtube.com/channel/"
+                    + channel_id
                 ),
-                "id": ",".join(batch),
-            }
-        )
+                "subscriber_count": subscribers,
+                "niche": detect_niche(
+                    title,
+                    description,
+                ),
+                "country": (
+                    clean_text(
+                        snippet.get(
+                            "country",
+                            "",
+                        )
+                    )
+                    or detect_country(
+                        title,
+                        description,
+                    )
+                ),
+                "contact_email": "",
+                "business_email": "",
+                "website": "",
+                "instagram_url": "",
+                "notes": (
+                    "Public YouTube channel "
+                    "information. Business contact "
+                    "details are not inferred."
+                ),
+            })
 
-        if not data:
-            continue
-
-        results.extend(
-            data.get(
-                "items",
-                []
-            )
-        )
-
-    return results
-
-
-# ============================================================
-# RECENT VIDEO DATA
-# ============================================================
-
-def get_recent_video_stats(
-    uploads_playlist_id: str,
-    limit: int = 10
-):
-
-    if not uploads_playlist_id:
-        return "", 0
-
-    playlist_data = youtube_get(
-        "playlistItems",
-        {
-            "part": "snippet",
-            "playlistId": uploads_playlist_id,
-            "maxResults": min(limit, 50),
-        }
-    )
-
-    if not playlist_data:
-        return "", 0
-
-    video_ids = []
-
-    latest_upload = ""
-
-    for item in playlist_data.get(
-        "items",
-        []
-    ):
-
-        snippet = item.get(
-            "snippet",
-            {}
-        )
-
-        video_id = (
-            snippet.get(
-                "resourceId",
-                {}
-            ).get(
-                "videoId",
-                ""
-            )
-        )
-
-        published_at = clean(
-            snippet.get(
-                "publishedAt",
-                ""
-            )
-        )
-
-        if video_id:
-            video_ids.append(
-                video_id
-            )
-
-        if (
-            published_at
-            and not latest_upload
-        ):
-            latest_upload = published_at
-
-    if not video_ids:
-        return latest_upload, 0
-
-    video_data = youtube_get(
-        "videos",
-        {
-            "part": "statistics",
-            "id": ",".join(video_ids),
-        }
-    )
-
-    if not video_data:
-        return latest_upload, 0
-
-    views = []
-
-    for video in video_data.get(
-        "items",
-        []
-    ):
-
-        stats = video.get(
-            "statistics",
-            {}
-        )
-
-        view_count = safe_int(
-            stats.get(
-                "viewCount",
-                0
-            )
-        )
-
-        if view_count > 0:
-            views.append(
-                view_count
-            )
-
-    if not views:
-        return latest_upload, 0
-
-    average_views = int(
-        sum(views) / len(views)
-    )
-
-    return (
-        latest_upload,
-        average_views
-    )
+    return details
 
 
 # ============================================================
-# BUILD YOUTUBE LEAD
+# CREATOR FILTER
 # ============================================================
 
-def build_youtube_lead(
-    channel: Dict
-) -> Optional[Dict]:
+def subscriber_in_target_range(
+    subscriber_count: str,
+) -> bool:
 
-    snippet = channel.get(
-        "snippet",
-        {}
-    )
+    if not subscriber_count:
+        return False
 
-    statistics = channel.get(
-        "statistics",
-        {}
-    )
-
-    content_details = channel.get(
-        "contentDetails",
-        {}
-    )
-
-    channel_id = clean(
-        channel.get(
-            "id",
-            ""
+    try:
+        count = int(
+            subscriber_count
         )
+
+    except ValueError:
+        return False
+
+    return 10_000 <= count <= 50_000
+
+
+def is_relevant_lead(
+    lead: Dict[str, str],
+) -> bool:
+
+    platform = lead.get(
+        "platform",
+        "",
     )
 
-    title = clean(
-        snippet.get(
-            "title",
-            ""
+    if platform == "YouTube":
+        return subscriber_in_target_range(
+            lead.get(
+                "subscriber_count",
+                "",
+            )
         )
-    )
 
-    description = clean(
-        snippet.get(
-            "description",
-            ""
-        )
-    )
-
-    country = clean(
-        snippet.get(
-            "country",
-            ""
-        )
-    ).upper()
-
-    subscribers = safe_int(
-        statistics.get(
-            "subscriberCount",
-            0
-        )
-    )
-
-    # --------------------------------------------------------
-    # INDIA FILTER
-    # --------------------------------------------------------
-
-    if country != "IN":
-        return None
-
-    # --------------------------------------------------------
-    # SUBSCRIBER FILTER
-    # 10K - 50K
-    # --------------------------------------------------------
-
-    if subscribers < MIN_SUBSCRIBERS:
-        return None
-
-    if subscribers > MAX_SUBSCRIBERS:
-        return None
-
-    if not channel_id:
-        return None
-
-    if not title:
-        return None
-
-    url = channel_url(
-        channel_id
-    )
-
-    niche = detect_niche(
-        title,
-        description
-    )
-
-    uploads_playlist_id = (
-        content_details
-        .get(
-            "relatedPlaylists",
-            {}
-        )
-        .get(
-            "uploads",
-            ""
-        )
-    )
-
-    recent_upload, avg_views = (
-        get_recent_video_stats(
-            uploads_playlist_id,
-            limit=10
-        )
-    )
-
-    return {
-        "name": title,
-        "platform": "YouTube",
-        "profile_url": url,
-        "channel_url": url,
-        "creator_or_business": "creator",
-        "niche": niche,
-        "country": "India",
-        "city": "",
-        "subscribers": subscribers,
-        "avg_views": avg_views,
-        "business_email": "",
-        "instagram": "",
-        "linkedin": "",
-        "twitter_x": "",
-        "website": "",
-        "recent_upload": recent_upload,
-        "contact_type": "public",
-        "lead_source": "youtube_api",
-        "status": "new",
-        "notes": (
-            "Discovered through official "
-            "YouTube Data API"
-        ),
-    }
+    return True
 
 
 # ============================================================
-# YOUTUBE DISCOVERY
+# PUBLIC BUSINESS CONTACT VALIDATION
 # ============================================================
 
-def discover_youtube_leads(
-    existing_keys: Set[str]
-) -> List[Dict]:
+def looks_like_public_business_email(
+    email: str,
+) -> bool:
 
-    if not YOUTUBE_API_KEY:
-        print(
-            "ERROR: YOUTUBE_API_KEY is missing."
+    if not email:
+        return False
+
+    email = email.strip()
+
+    pattern = (
+        r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+    )
+
+    return bool(
+        re.match(
+            pattern,
+            email,
         )
+    )
+
+
+def add_public_contact(
+    lead: Dict[str, str],
+    email: str = "",
+    website: str = "",
+) -> Dict[str, str]:
+
+    """
+    Store only contact information that has been
+    supplied by an authorized/public source.
+    """
+
+    if email and looks_like_public_business_email(email):
+        lead["business_email"] = email.strip()
+
+    if website:
+        lead["website"] = website.strip()
+
+    return lead
+
+
+# ============================================================
+# INSTAGRAM
+# ============================================================
+
+def collect_instagram_leads():
+    """
+    No unauthorized Instagram scraping.
+
+    Future implementation can use an authorized
+    Meta/Instagram API or another permitted data source.
+    """
+
+    print(
+        "Instagram: authorized API not configured. "
+        "Skipping."
+    )
+
+    return []
+
+
+# ============================================================
+# FACEBOOK
+# ============================================================
+
+def collect_facebook_leads():
+    """
+    No unauthorized Facebook scraping.
+
+    Future implementation can use an authorized
+    Meta API.
+    """
+
+    print(
+        "Facebook: authorized API not configured. "
+        "Skipping."
+    )
+
+    return []
+
+
+# ============================================================
+# X / TWITTER
+# ============================================================
+
+def collect_x_leads():
+    """
+    No unauthorized X/Twitter scraping.
+
+    Future implementation can use an authorized API.
+    """
+
+    print(
+        "X/Twitter: authorized API not configured. "
+        "Skipping."
+    )
+
+    return []
+
+
+# ============================================================
+# LINKEDIN
+# ============================================================
+
+def collect_linkedin_leads():
+    """
+    No unauthorized LinkedIn scraping.
+
+    Future implementation can use an authorized API
+    or approved data source.
+    """
+
+    print(
+        "LinkedIn: authorized API not configured. "
+        "Skipping."
+    )
+
+    return []
+
+
+# ============================================================
+# WEBSITES / PUBLIC WEB
+# ============================================================
+
+def collect_website_leads():
+    """
+    Website discovery requires an authorized search/API
+    source. No unauthorized scraping is performed here.
+    """
+
+    print(
+        "Websites: authorized search source "
+        "not configured. Skipping."
+    )
+
+    return []
+
+
+# ============================================================
+# YOUTUBE COLLECTION
+# ============================================================
+
+def collect_youtube_leads(
+    existing_leads: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+
+    youtube = get_youtube_service()
+
+    if youtube is None:
         return []
 
-    discovered_ids = set()
+    discovered = []
 
-    # --------------------------------------------------------
-    # SEARCH
-    # --------------------------------------------------------
+    print(
+        "Starting YouTube discovery..."
+    )
 
-    for query in YOUTUBE_QUERIES:
+    for search_term in SEARCH_TERMS:
 
-        if (
-            len(discovered_ids)
-            >= MAX_CHANNELS_PER_RUN
-        ):
-            break
-
-        ids = search_youtube_channels(
-            query
+        print(
+            f"Searching YouTube: {search_term}"
         )
 
-        for channel_id in ids:
+        channels = search_youtube_channels(
+            youtube,
+            search_term,
+            max_results=25,
+        )
 
-            if (
-                len(discovered_ids)
-                >= MAX_CHANNELS_PER_RUN
+        channel_ids = [
+            channel["channel_id"]
+            for channel in channels
+            if channel.get("channel_id")
+        ]
+
+        channel_details = (
+            get_youtube_channel_details(
+                youtube,
+                channel_ids,
+            )
+        )
+
+        for lead in channel_details:
+
+            if not is_relevant_lead(
+                lead
             ):
-                break
+                continue
 
-            discovered_ids.add(
-                channel_id
-            )
+            if lead_exists(
+                existing_leads,
+                lead["channel_url"],
+                lead["name"],
+            ):
+                continue
 
-    print(
-        "Unique YouTube channels "
-        f"discovered: {len(discovered_ids)}"
-    )
-
-    if not discovered_ids:
-        return []
-
-    # --------------------------------------------------------
-    # CHANNEL DETAILS
-    # --------------------------------------------------------
-
-    channels = get_channel_details(
-        list(discovered_ids)
-    )
-
-    leads = []
-
-    for channel in channels:
-
-        try:
-
-            lead = build_youtube_lead(
-                channel
-            )
-
-        except Exception as e:
-
-            print(
-                "Error building YouTube "
-                f"lead: {e}"
-            )
-
-            continue
-
-        if not lead:
-            continue
-
-        if is_duplicate(
-            lead,
-            existing_keys
-        ):
-            continue
-
-        add_row_keys(
-            lead,
-            existing_keys
-        )
-
-        leads.append(
-            lead
-        )
-
-    print(
-        "New YouTube leads after "
-        "India + subscriber filtering "
-        f"and duplicate check: {len(leads)}"
-    )
-
-    return leads
-
-
-# ============================================================
-# GOOGLE SHEETS
-# ============================================================
-
-GOOGLE_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
-
-def connect_google_sheet():
-
-    if not GOOGLE_SERVICE_ACCOUNT_JSON:
-
-        print(
-            "Google service account "
-            "secret is missing."
-        )
-
-        return None
-
-    try:
-
-        service_account_info = json.loads(
-            GOOGLE_SERVICE_ACCOUNT_JSON
-        )
-
-        credentials = (
-            Credentials
-            .from_service_account_info(
-                service_account_info,
-                scopes=GOOGLE_SCOPES
-            )
-        )
-
-        client = gspread.authorize(
-            credentials
-        )
-
-        # ----------------------------------------------------
-        # USE SHEET ID FIRST
-        # ----------------------------------------------------
-
-        if GOOGLE_SHEET_ID:
-
-            print(
-                "Opening Google Sheet by ID."
-            )
-
-            spreadsheet = (
-                client.open_by_key(
-                    GOOGLE_SHEET_ID
+            duplicate_in_new = any(
+                normalize_url(
+                    existing.get(
+                        "channel_url",
+                        "",
+                    )
                 )
-            )
-
-        else:
-
-            print(
-                "GOOGLE_SHEET_ID is missing."
-            )
-
-            print(
-                "Trying Google Sheet by name: "
-                f"{GOOGLE_SHEET_NAME}"
-            )
-
-            spreadsheet = (
-                client.open(
-                    GOOGLE_SHEET_NAME
+                == normalize_url(
+                    lead["channel_url"]
                 )
+                for existing in discovered
             )
 
-        # ----------------------------------------------------
-        # GET / CREATE LEADS WORKSHEET
-        # ----------------------------------------------------
+            if duplicate_in_new:
+                continue
 
-        try:
-
-            worksheet = (
-                spreadsheet.worksheet(
-                    "Leads"
-                )
+            discovered.append(
+                lead
             )
 
-        except gspread.WorksheetNotFound:
+        time.sleep(1)
 
-            print(
-                "Leads worksheet not found."
-            )
+    print(
+        f"New YouTube leads found: "
+        f"{len(discovered)}"
+    )
 
-            print(
-                "Creating Leads worksheet..."
-            )
-
-            worksheet = (
-                spreadsheet.add_worksheet(
-                    title="Leads",
-                    rows=1000,
-                    cols=len(CSV_COLUMNS)
-                )
-            )
-
-            worksheet.append_row(
-                CSV_COLUMNS,
-                value_input_option="USER_ENTERED"
-            )
-
-        # ----------------------------------------------------
-        # CHECK EMPTY SHEET
-        # ----------------------------------------------------
-
-        values = (
-            worksheet.get_all_values()
-        )
-
-        if not values:
-
-            worksheet.append_row(
-                CSV_COLUMNS,
-                value_input_option="USER_ENTERED"
-            )
-
-        print(
-            "Google Sheets connection successful."
-        )
-
-        return worksheet
-
-    except Exception as e:
-
-        print(
-            "Google Sheets connection failed:"
-        )
-
-        print(
-            f"{type(e).__name__}: {e}"
-        )
-
-        return None
-
-
-def get_google_sheet_existing_rows(
-    worksheet
-) -> List[Dict]:
-
-    if worksheet is None:
-        return []
-
-    try:
-
-        values = (
-            worksheet.get_all_records()
-        )
-
-        return values
-
-    except Exception as e:
-
-        print(
-            "Could not read Google Sheet:"
-        )
-
-        print(
-            f"{type(e).__name__}: {e}"
-        )
-
-        return []
-
-
-def append_to_google_sheet(
-    worksheet,
-    rows: List[Dict]
-) -> int:
-
-    if worksheet is None:
-        return 0
-
-    if not rows:
-        return 0
-
-    added = 0
-
-    for row in rows:
-
-        try:
-
-            values = [
-                row.get(
-                    column,
-                    ""
-                )
-                for column in CSV_COLUMNS
-            ]
-
-            worksheet.append_row(
-                values,
-                value_input_option="USER_ENTERED"
-            )
-
-            added += 1
-
-        except Exception as e:
-
-            print(
-                "Google Sheets row error:"
-            )
-
-            print(
-                f"{type(e).__name__}: {e}"
-            )
-
-    return added
+    return discovered
 
 
 # ============================================================
-# IMPORT PUBLIC LEADS
+# ALL PLATFORMS
 # ============================================================
 
-def import_public_leads(
-    existing_keys: Set[str]
-) -> List[Dict]:
+def collect_all_leads(
+    existing_leads: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
 
-    if not PUBLIC_LEADS_FILE.exists():
+    all_new_leads = []
 
-        print(
-            "public_leads.csv not found."
+    # YouTube
+    all_new_leads.extend(
+        collect_youtube_leads(
+            existing_leads
         )
-
-        return []
-
-    print(
-        "Reading input file: "
-        f"{PUBLIC_LEADS_FILE}"
     )
 
-    rows = read_csv_file(
-        PUBLIC_LEADS_FILE
+    # Instagram
+    all_new_leads.extend(
+        collect_instagram_leads()
     )
 
-    print(
-        f"Public leads found: {len(rows)}"
+    # Facebook
+    all_new_leads.extend(
+        collect_facebook_leads()
     )
 
-    new_rows = []
-
-    for row in rows:
-
-        if is_duplicate(
-            row,
-            existing_keys
-        ):
-            continue
-
-        add_row_keys(
-            row,
-            existing_keys
-        )
-
-        new_rows.append(
-            row
-        )
-
-    print(
-        "New public leads: "
-        f"{len(new_rows)}"
+    # X/Twitter
+    all_new_leads.extend(
+        collect_x_leads()
     )
 
-    return new_rows
+    # LinkedIn
+    all_new_leads.extend(
+        collect_linkedin_leads()
+    )
+
+    # Websites
+    all_new_leads.extend(
+        collect_website_leads()
+    )
+
+    return all_new_leads
 
 
 # ============================================================
-# MAIN
+# PROGRAM ENTRY POINT
 # ============================================================
 
-def main():
+def main() -> None:
 
-    print()
-    print("=" * 50)
-    print("Lead Collector started.")
-    print("=" * 50)
-    print()
+    print("=" * 60)
+    print("LEAD AUTOMATION STARTED")
+    print("=" * 60)
 
-    ensure_data_dir()
-    create_empty_csv_if_needed()
-
-    # --------------------------------------------------------
-    # EXISTING CSV
-    # --------------------------------------------------------
-
-    existing_csv_rows = read_csv_file(
-        LEADS_FILE
+    print(
+        f"Project root: {PROJECT_ROOT}"
     )
 
     print(
-        "Existing CSV leads: "
-        f"{len(existing_csv_rows)}"
+        f"Lead file: {DATA_FILE}"
     )
 
-    existing_keys = build_duplicate_keys(
-        existing_csv_rows
+    ensure_leads_file()
+
+    existing_leads = (
+        load_existing_leads()
     )
 
-    # --------------------------------------------------------
-    # GOOGLE SHEETS
-    # --------------------------------------------------------
-
-    worksheet = connect_google_sheet()
-
-    sheet_rows = (
-        get_google_sheet_existing_rows(
-            worksheet
-        )
-    )
-
-    if sheet_rows:
-
-        print(
-            "Existing Google Sheet leads: "
-            f"{len(sheet_rows)}"
-        )
-
-        sheet_keys = build_duplicate_keys(
-            sheet_rows
-        )
-
-        existing_keys.update(
-            sheet_keys
-        )
-
-    else:
-
-        print(
-            "Existing Google Sheet leads: 0"
-        )
-
-    # --------------------------------------------------------
-    # PUBLIC CSV LEADS
-    # --------------------------------------------------------
-
-    public_leads = import_public_leads(
-        existing_keys
-    )
-
-    # --------------------------------------------------------
-    # YOUTUBE LEADS
-    # --------------------------------------------------------
-
-    youtube_leads = (
-        discover_youtube_leads(
-            existing_keys
-        )
-    )
-
-    # --------------------------------------------------------
-    # COMBINE
-    # --------------------------------------------------------
-
-    new_leads = (
-        public_leads
-        + youtube_leads
-    )
-
-    print()
     print(
-        f"Total new leads: {len(new_leads)}"
+        f"Existing leads: "
+        f"{len(existing_leads)}"
     )
 
-    # --------------------------------------------------------
-    # SAVE CSV
-    # --------------------------------------------------------
+    new_leads = collect_all_leads(
+        existing_leads
+    )
 
     if new_leads:
 
-        append_rows_to_csv(
+        existing_leads.extend(
             new_leads
         )
 
+        save_leads(
+            existing_leads
+        )
+
         print(
-            "CSV updated successfully."
+            f"Added {len(new_leads)} "
+            f"new leads."
         )
 
     else:
 
         print(
-            "No new leads to add to CSV."
-        )
-
-    # --------------------------------------------------------
-    # SAVE GOOGLE SHEETS
-    # --------------------------------------------------------
-
-    sheets_added = (
-        append_to_google_sheet(
-            worksheet,
-            new_leads
-        )
-    )
-
-    print(
-        "New leads added to Google Sheets: "
-        f"{sheets_added}"
-    )
-
-    # --------------------------------------------------------
-    # FINAL STATS
-    # --------------------------------------------------------
-
-    final_csv_rows = read_csv_file(
-        LEADS_FILE
-    )
-
-    print()
-    print("=" * 50)
-    print("FINAL RESULT")
-    print("=" * 50)
-    print(
-        f"CSV total leads: "
-        f"{len(final_csv_rows)}"
-    )
-    print(
-        f"New leads this run: "
-        f"{len(new_leads)}"
-    )
-    print(
-        f"Google Sheets added: "
-        f"{sheets_added}"
-    )
-    print("=" * 50)
-    print()
-    print(
-        "Lead Collector completed successfully."
-    )
-
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
-
-if __name__ == "__main__":
-    main()
+            "No new leads collected
