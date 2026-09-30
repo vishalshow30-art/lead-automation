@@ -47,10 +47,29 @@ jobs:
           echo "Google service account secret is available."
           echo "Google Sheet ID is available."
 
-      - name: Run lead collector
+      - name: Run lead collector for 5 hours
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
         run: |
-          python src/lead_collector.py
+          END_TIME=$(( $(date +%s) + 17400 ))
+
+          while [ $(date +%s) -lt $END_TIME ]; do
+            echo "=========================================="
+            echo "Starting lead collection cycle..."
+            echo "=========================================="
+
+            python src/lead_collector.py
+
+            echo "Cycle completed."
+
+            if [ $(date +%s) -lt $END_TIME ]; then
+              echo "Waiting 30 minutes before next cycle..."
+              sleep 1800
+            fi
+          done
+
+          echo "=========================================="
+          echo "5-hour lead collection completed."
+          echo "=========================================="
