@@ -6,7 +6,7 @@ on:
 jobs:
   lead-automation:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 1
 
     steps:
 
