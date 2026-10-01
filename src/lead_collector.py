@@ -32,13 +32,12 @@ def get_project_root() -> Path:
 
 
 PROJECT_ROOT = get_project_root()
-
 DATA_DIR = PROJECT_ROOT / "data"
 DATA_FILE = DATA_DIR / "leads.csv"
 
 
 # ============================================================
-# CSV COLUMNS
+# CSV HEADERS
 # ============================================================
 
 CSV_HEADERS = [
@@ -57,7 +56,7 @@ CSV_HEADERS = [
 
 
 # ============================================================
-# SEARCH TERMS
+# YOUTUBE SEARCH TERMS
 # ============================================================
 
 SEARCH_TERMS = [
@@ -87,10 +86,7 @@ SEARCH_TERMS = [
 # ============================================================
 
 def ensure_leads_file() -> None:
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DATA_FILE.exists():
         with DATA_FILE.open(
@@ -104,13 +100,13 @@ def ensure_leads_file() -> None:
             )
             writer.writeheader()
 
-        print(f"Created CSV: {DATA_FILE}")
+        print("Created CSV:", DATA_FILE)
 
 
 def load_existing_leads() -> List[Dict[str, str]]:
     ensure_leads_file()
 
-    leads = []
+    leads: List[Dict[str, str]] = []
 
     try:
         with DATA_FILE.open(
@@ -118,12 +114,10 @@ def load_existing_leads() -> List[Dict[str, str]]:
             newline="",
             encoding="utf-8",
         ) as file:
-
             reader = csv.DictReader(file)
 
             for row in reader:
-
-                lead = {}
+                lead: Dict[str, str] = {}
 
                 for header in CSV_HEADERS:
                     lead[header] = (
@@ -133,10 +127,7 @@ def load_existing_leads() -> List[Dict[str, str]]:
                 leads.append(lead)
 
     except Exception as exc:
-
-        print(
-            f"Could not read CSV: {exc}"
-        )
+        print("Could not read CSV:", exc)
 
     return leads
 
@@ -145,10 +136,7 @@ def save_leads(
     leads: List[Dict[str, str]]
 ) -> None:
 
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     with DATA_FILE.open(
         "w",
@@ -164,20 +152,14 @@ def save_leads(
         writer.writeheader()
 
         for lead in leads:
-
             row = {}
 
             for header in CSV_HEADERS:
-                row[header] = lead.get(
-                    header,
-                    "",
-                )
+                row[header] = lead.get(header, "")
 
             writer.writerow(row)
 
-    print(
-        f"CSV saved successfully: {DATA_FILE}"
-    )
+    print("CSV saved successfully:", DATA_FILE)
 
 
 # ============================================================
@@ -187,20 +169,16 @@ def save_leads(
 def get_google_sheets_service():
 
     if build is None:
-
         print(
             "ERROR: google-api-python-client "
             "is not installed."
         )
-
         return None
 
     if Credentials is None:
-
         print(
             "ERROR: google-auth is not installed."
         )
-
         return None
 
     service_account_json = os.getenv(
@@ -208,16 +186,13 @@ def get_google_sheets_service():
     )
 
     if not service_account_json:
-
         print(
             "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
             "is missing."
         )
-
         return None
 
     try:
-
         credentials_info = json.loads(
             service_account_json
         )
@@ -237,18 +212,15 @@ def get_google_sheets_service():
             credentials=credentials,
         )
 
-        print(
-            "Google Sheets connection successful."
-        )
+        print("Google Sheets connection successful.")
 
         return service
 
     except Exception as exc:
-
         print(
-            f"Google Sheets connection failed: {exc}"
+            "Google Sheets connection failed:",
+            exc,
         )
-
         return None
 
 
@@ -261,11 +233,7 @@ def save_leads_to_google_sheet(
 ) -> None:
 
     if not leads:
-
-        print(
-            "Google Sheet: no new leads to upload."
-        )
-
+        print("Google Sheet: no new leads to upload.")
         return
 
     spreadsheet_id = os.getenv(
@@ -273,11 +241,7 @@ def save_leads_to_google_sheet(
     )
 
     if not spreadsheet_id:
-
-        print(
-            "ERROR: GOOGLE_SHEET_ID is missing."
-        )
-
+        print("ERROR: GOOGLE_SHEET_ID is missing.")
         return
 
     sheets = get_google_sheets_service()
@@ -286,7 +250,6 @@ def save_leads_to_google_sheet(
         return
 
     try:
-
         spreadsheet = (
             sheets.spreadsheets()
             .get(
@@ -301,11 +264,7 @@ def save_leads_to_google_sheet(
         )
 
         if not sheet_list:
-
-            print(
-                "ERROR: No sheet tab found."
-            )
-
+            print("ERROR: No sheet tab found.")
             return
 
         sheet_title = (
@@ -315,7 +274,8 @@ def save_leads_to_google_sheet(
         )
 
         print(
-            f"Google Sheet tab: {sheet_title}"
+            "Google Sheet tab:",
+            sheet_title,
         )
 
         # ----------------------------------------------------
@@ -326,23 +286,26 @@ def save_leads_to_google_sheet(
             f"'{sheet_title}'!A1:K1"
         )
 
-        sheets.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=header_range,
-            valueInputOption="RAW",
-            body={
-                "values": [
-                    CSV_HEADERS
-                ]
-            },
-        ).execute()
-
-        print(
-            "Google Sheet header checked."
+        (
+            sheets.spreadsheets()
+            .values()
+            .update(
+                spreadsheetId=spreadsheet_id,
+                range=header_range,
+                valueInputOption="RAW",
+                body={
+                    "values": [
+                        CSV_HEADERS
+                    ]
+                },
+            )
+            .execute()
         )
 
+        print("Google Sheet header checked.")
+
         # ----------------------------------------------------
-        # Prepare lead rows
+        # Prepare rows
         # ----------------------------------------------------
 
         values = []
@@ -352,18 +315,14 @@ def save_leads_to_google_sheet(
             row = []
 
             for header in CSV_HEADERS:
-
                 row.append(
-                    lead.get(
-                        header,
-                        "",
-                    )
+                    lead.get(header, "")
                 )
 
             values.append(row)
 
         # ----------------------------------------------------
-        # Upload leads
+        # Upload rows
         # ----------------------------------------------------
 
         range_name = (
@@ -391,56 +350,41 @@ def save_leads_to_google_sheet(
             .get("updatedRange", "")
         )
 
+        print("Google Sheet updated successfully.")
         print(
-            "Google Sheet updated successfully."
-        )
-
-        print(
-            f"Google Sheet rows added: "
-            f"{len(values)}"
+            "Google Sheet rows added:",
+            len(values),
         )
 
         if updated_range:
-
             print(
-                f"Updated range: {updated_range}"
+                "Updated range:",
+                updated_range,
             )
 
     except Exception as exc:
-
         print(
-            f"Google Sheet upload failed: {exc}"
+            "Google Sheet upload failed:",
+            exc,
         )
 
 
 # ============================================================
-# TEXT CLEANING
+# TEXT FUNCTIONS
 # ============================================================
 
-def clean_text(
-    value: str
-) -> str:
+def clean_text(value: str) -> str:
 
     if not value:
         return ""
 
-    value = value.replace(
-        "\n",
-        " ",
-    )
-
-    value = re.sub(
-        r"\s+",
-        " ",
-        value,
-    )
+    value = value.replace("\n", " ")
+    value = re.sub(r"\s+", " ", value)
 
     return value.strip()
 
 
-def normalize_url(
-    url: str
-) -> str:
+def normalize_url(url: str) -> str:
 
     return (
         url
@@ -460,30 +404,17 @@ def lead_exists(
     name: str,
 ) -> bool:
 
-    new_url = normalize_url(
-        channel_url
-    )
-
-    new_name = (
-        name
-        .strip()
-        .lower()
-    )
+    new_url = normalize_url(channel_url)
+    new_name = name.strip().lower()
 
     for lead in existing_leads:
 
         old_url = normalize_url(
-            lead.get(
-                "channel_url",
-                "",
-            )
+            lead.get("channel_url", "")
         )
 
         old_name = (
-            lead.get(
-                "name",
-                "",
-            )
+            lead.get("name", "")
             .strip()
             .lower()
         )
@@ -511,84 +442,71 @@ def detect_niche(
     ).lower()
 
     keywords = {
-
         "Gaming": [
             "gaming",
             "gamer",
             "gameplay",
             "esports",
         ],
-
         "Tech": [
             "tech",
             "technology",
             "smartphone",
             "computer",
         ],
-
         "Gadgets": [
             "gadget",
             "gadgets",
             "device",
             "accessories",
         ],
-
         "PC Computer": [
             "pc",
             "laptop",
             "desktop",
             "computer",
         ],
-
         "Mobile": [
             "mobile",
             "android",
             "iphone",
             "ios",
         ],
-
         "Lifestyle": [
             "lifestyle",
             "daily life",
         ],
-
         "Education": [
             "education",
             "study",
             "learning",
         ],
-
         "Entertainment": [
             "entertainment",
             "movies",
             "music",
         ],
-
         "Fitness": [
             "fitness",
             "workout",
             "gym",
         ],
-
         "Fashion": [
             "fashion",
             "style",
             "outfit",
         ],
-
         "Travel": [
             "travel",
             "tour",
             "trip",
         ],
-
         "Finance": [
             "finance",
             "investment",
             "investing",
             "stock",
         ],
-
         "Automotive": [
             "automotive",
             "car",
@@ -596,14 +514,12 @@ def detect_niche(
             "bike",
             "automobile",
         ],
-
         "Comedy": [
             "comedy",
             "funny",
             "humor",
             "standup",
         ],
-
         "Vlogging": [
             "vlog",
             "vlogger",
@@ -668,19 +584,11 @@ def get_youtube_service():
     )
 
     if not api_key:
-
-        print(
-            "ERROR: YOUTUBE_API_KEY is missing."
-        )
-
+        print("ERROR: YOUTUBE_API_KEY is missing.")
         return None
 
     if build is None:
-
-        print(
-            "ERROR: Google API library missing."
-        )
-
+        print("ERROR: Google API library missing.")
         return None
 
     try:
@@ -691,23 +599,22 @@ def get_youtube_service():
             developerKey=api_key,
         )
 
-        print(
-            "YouTube API connection successful."
-        )
+        print("YouTube API connection successful.")
 
         return service
 
     except Exception as exc:
 
         print(
-            f"YouTube connection failed: {exc}"
+            "YouTube connection failed:",
+            exc,
         )
 
         return None
 
 
 # ============================================================
-# YOUTUBE CHANNEL SEARCH
+# YOUTUBE SEARCH
 # ============================================================
 
 def search_youtube_channels(
@@ -734,18 +641,15 @@ def search_youtube_channels(
     except Exception as exc:
 
         print(
-            f"YouTube search failed: "
-            f"{search_term}"
+            "YouTube search failed:",
+            search_term,
         )
 
         print(exc)
 
         return results
 
-    for item in response.get(
-        "items",
-        [],
-    ):
+    for item in response.get("items", []):
 
         channel_id = (
             item
@@ -829,15 +733,13 @@ def get_youtube_channel_details(
         except Exception as exc:
 
             print(
-                f"YouTube details error: {exc}"
+                "YouTube details error:",
+                exc,
             )
 
             continue
 
-        for item in response.get(
-            "items",
-            [],
-        ):
+        for item in response.get("items", []):
 
             snippet = item.get(
                 "snippet",
@@ -877,7 +779,6 @@ def get_youtube_channel_details(
                 "hiddenSubscriberCount",
                 False,
             ):
-
                 subscribers = ""
 
             country = clean_text(
@@ -888,13 +789,12 @@ def get_youtube_channel_details(
             )
 
             if not country:
-
                 country = detect_country(
                     title,
                     description,
                 )
 
-            results.append({
+            lead = {
                 "name": title,
                 "platform": "YouTube",
                 "channel_url": (
@@ -915,7 +815,9 @@ def get_youtube_channel_details(
                     "Collected from public "
                     "YouTube channel information."
                 ),
-            })
+            }
+
+            results.append(lead)
 
     return results
 
@@ -932,19 +834,12 @@ def subscriber_in_target_range(
         return False
 
     try:
-
-        count = int(
-            subscriber_count
-        )
-
+        count = int(subscriber_count)
     except ValueError:
-
         return False
 
     return (
-        10000
-        <= count
-        <= 50000
+        10000 <= count <= 50000
     )
 
 
@@ -952,9 +847,7 @@ def is_relevant_lead(
     lead: Dict[str, str],
 ) -> bool:
 
-    if lead.get(
-        "platform"
-    ) == "YouTube":
+    if lead.get("platform") == "YouTube":
 
         return subscriber_in_target_range(
             lead.get(
@@ -979,16 +872,15 @@ def collect_youtube_leads(
     if youtube is None:
         return []
 
-    new_leads = []
+    new_leads: List[Dict[str, str]] = []
 
-    print(
-        "Starting YouTube discovery..."
-    )
+    print("Starting YouTube discovery...")
 
     for search_term in SEARCH_TERMS:
 
         print(
-            f"Searching: {search_term}"
+            "Searching:",
+            search_term,
         )
 
         channels = search_youtube_channels(
@@ -1000,7 +892,6 @@ def collect_youtube_leads(
         channel_ids = []
 
         for channel in channels:
-
             channel_ids.append(
                 channel["channel_id"]
             )
@@ -1012,9 +903,7 @@ def collect_youtube_leads(
 
         for lead in details:
 
-            if not is_relevant_lead(
-                lead
-            ):
+            if not is_relevant_lead(lead):
                 continue
 
             if lead_exists(
@@ -1031,6 +920,39 @@ def collect_youtube_leads(
             ):
                 continue
 
-            new_leads.append(
-                lead
-  
+            # Simple one-line append.
+            # This avoids the previous syntax problem.
+            new_leads.append(lead)
+
+        time.sleep(1)
+
+    print(
+        "New YouTube leads found:",
+        len(new_leads),
+    )
+
+    return new_leads
+
+
+# ============================================================
+# OTHER SOURCES
+# ============================================================
+
+def collect_instagram_leads():
+
+    print(
+        "Instagram: authorized API "
+        "not configured."
+    )
+
+    return []
+
+
+def collect_facebook_leads():
+
+    print(
+        "Facebook: authorized API "
+        "not configured."
+    )
+
+ 
