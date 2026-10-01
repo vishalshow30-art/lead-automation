@@ -4,31 +4,31 @@ import json
 import os
 import re
 import time
-from typing import Any, Dict, List
 
 import requests
 
 
 # ============================================================
-# PROJECT
+# PROJECT SETTINGS
 # ============================================================
 
-def get_project_root() -> Path:
-    current_file = Path(__file__).resolve()
-
-    for parent in [current_file.parent, *current_file.parents]:
-        if (parent / "requirements.txt").exists():
-            return parent
-
-    return current_file.parent.parent
-
-
-PROJECT_ROOT = get_project_root()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_FILE = PROJECT_ROOT / "data" / "leads.csv"
 
+MIN_SUBSCRIBERS = 10_000
+MAX_SUBSCRIBERS = 50_000
+
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv(
+    "GOOGLE_SERVICE_ACCOUNT_JSON", ""
+).strip()
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
+
+REQUEST_TIMEOUT = 30
+
 
 # ============================================================
-# CSV COLUMNS
+# CSV HEADER
 # ============================================================
 
 CSV_HEADERS = [
@@ -56,62 +56,24 @@ CSV_HEADERS = [
 
 
 # ============================================================
-# SETTINGS
+# BASIC HELPERS
 # ============================================================
 
-MIN_SUBSCRIBERS = 10_000
-MAX_SUBSCRIBERS = 50_000
-
-REQUEST_TIMEOUT = 30
-SLEEP_BETWEEN_REQUESTS = 0.2
-
-YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
-
-
-# ============================================================
-# SECRETS
-# ============================================================
-
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
-
-GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv(
-    "GOOGLE_SERVICE_ACCOUNT_JSON", ""
-).strip()
-
-GOOGLE_SHEET_ID = os.getenv(
-    "GOOGLE_SHEET_ID", ""
-).strip()
-
-INSTAGRAM_ACCESS_TOKEN = os.getenv(
-    "INSTAGRAM_ACCESS_TOKEN", ""
-).strip()
-
-FACEBOOK_ACCESS_TOKEN = os.getenv(
-    "FACEBOOK_ACCESS_TOKEN", ""
-).strip()
-
-FACEBOOK_PAGE_ID = os.getenv(
-    "FACEBOOK_PAGE_ID", ""
-).strip()
-
-X_BEARER_TOKEN = os.getenv(
-    "X_BEARER_TOKEN", ""
-).strip()
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def clean(value: Any) -> str:
+def clean(value):
     if value is None:
         return ""
-
     return str(value).strip()
 
 
-def normalize_url(value: Any) -> str:
-    url = clean(value)
+def safe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def normalize_url(url):
+    url = clean(url)
 
     if not url:
         return ""
@@ -122,38 +84,25 @@ def normalize_url(value: Any) -> str:
     return url.rstrip("/")
 
 
-def safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def extract_email(text: Any) -> str:
+def extract_email(text):
     text = clean(text)
 
     if not text:
         return ""
 
-    pattern = (
-        r"[A-Za-z0-9._%+-]+"
-        r"@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
-    )
-
+    pattern = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
     matches = re.findall(pattern, text)
 
     for email in matches:
-        lower = email.lower()
+        email_lower = email.lower()
 
-        if any(
-            blocked in lower
-            for blocked in [
-                "example.com",
-                "example.org",
-                "example.net",
-                "test.com",
-            ]
-        ):
+        if "example.com" in email_lower:
+            continue
+
+        if "example.org" in email_lower:
+            continue
+
+        if "example.net" in email_lower:
             continue
 
         return email
@@ -161,10 +110,10 @@ def extract_email(text: Any) -> str:
     return ""
 
 
-def detect_niche(text: Any) -> str:
+def detect_niche(text):
     text = clean(text).lower()
 
-    niches = {
+    keywords = {
         "Gaming": [
             "gaming",
             "gamer",
@@ -180,7 +129,6 @@ def detect_niche(text: Any) -> str:
             "technology",
             "tech",
             "smartphone",
-            "smartphones",
             "android",
             "iphone",
             "software",
@@ -202,10 +150,9 @@ def detect_niche(text: Any) -> str:
             "macbook",
         ],
         "Mobile": [
+            "mobile phone",
             "mobile",
-            "phone",
-            "android",
-            "iphone",
+            "smartphone",
         ],
         "Lifestyle": [
             "lifestyle",
@@ -214,7 +161,6 @@ def detect_niche(text: Any) -> str:
         ],
         "Education": [
             "education",
-            "educational",
             "study",
             "learning",
             "tutorial",
@@ -238,13 +184,12 @@ def detect_niche(text: Any) -> str:
             "style",
             "makeup",
             "beauty",
-            "clothing",
         ],
         "Travel": [
             "travel",
             "travelling",
-            "tour",
             "trip",
+            "tour",
         ],
         "Finance": [
             "finance",
@@ -253,7 +198,6 @@ def detect_niche(text: Any) -> str:
             "investing",
             "investment",
             "trading",
-            "money",
         ],
         "Automotive": [
             "automotive",
@@ -278,46 +222,19 @@ def detect_niche(text: Any) -> str:
         ],
     }
 
-    for niche, keywords in niches.items():
-        for keyword in keywords:
-            if keyword in text:
+    for niche, words in keywords.items():
+        for word in words:
+            if word in text:
                 return niche
 
     return "Other"
 
 
-def request_json(
-    url: str,
-    params: Dict[str, Any] = None,
-    headers: Dict[str, str] = None,
-) -> Dict[str, Any]:
-
-    try:
-        response = requests.get(
-            url,
-            params=params or {},
-            headers=headers or {},
-            timeout=REQUEST_TIMEOUT,
-        )
-
-        response.raise_for_status()
-
-        return response.json()
-
-    except requests.RequestException as exc:
-        print(f"Request failed: {exc}")
-        return {}
-
-    except ValueError as exc:
-        print(f"Invalid JSON response: {exc}")
-        return {}
-
-
 # ============================================================
-# CSV
+# CSV FUNCTIONS
 # ============================================================
 
-def create_csv_if_missing() -> None:
+def ensure_csv():
     DATA_FILE.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -329,27 +246,15 @@ def create_csv_if_missing() -> None:
             newline="",
             encoding="utf-8",
         ) as file:
-
             writer = csv.DictWriter(
                 file,
                 fieldnames=CSV_HEADERS,
             )
-
             writer.writeheader()
 
 
-def normalize_lead(
-    row: Dict[str, Any]
-) -> Dict[str, str]:
-
-    return {
-        header: clean(row.get(header, ""))
-        for header in CSV_HEADERS
-    }
-
-
-def read_csv() -> List[Dict[str, str]]:
-    create_csv_if_missing()
+def read_csv():
+    ensure_csv()
 
     try:
         with DATA_FILE.open(
@@ -357,68 +262,78 @@ def read_csv() -> List[Dict[str, str]]:
             newline="",
             encoding="utf-8",
         ) as file:
-
             reader = csv.DictReader(file)
 
-            return [
-                normalize_lead(row)
-                for row in reader
-                if row
-            ]
+            rows = []
 
-    except Exception as exc:
-        print(f"CSV read error: {exc}")
+            for row in reader:
+                if row:
+                    rows.append(row)
+
+            return rows
+
+    except Exception as error:
+        print(f"CSV read error: {error}")
         return []
 
 
-def get_lead_key(
-    lead: Dict[str, Any]
-) -> str:
-
-    lead = normalize_lead(lead)
-
-    platform = lead["platform"].lower()
-
-    profile_url = normalize_url(
-        lead["profile_url"]
+def lead_key(lead):
+    platform = clean(
+        lead.get("platform", "")
     ).lower()
 
-    channel_url = normalize_url(
-        lead["channel_url"]
+    profile = normalize_url(
+        lead.get("profile_url", "")
     ).lower()
 
-    if profile_url:
-        return f"{platform}|{profile_url}"
+    channel = normalize_url(
+        lead.get("channel_url", "")
+    ).lower()
 
-    if channel_url:
-        return f"{platform}|{channel_url}"
+    if profile:
+        return platform + "|" + profile
 
-    name = lead["name"].lower()
-    email = lead["business_email"].lower()
+    if channel:
+        return platform + "|" + channel
 
-    return f"{platform}|{name}|{email}"
+    name = clean(
+        lead.get("name", "")
+    ).lower()
+
+    email = clean(
+        lead.get("business_email", "")
+    ).lower()
+
+    return platform + "|" + name + "|" + email
 
 
-def save_csv(
-    leads: List[Dict[str, Any]]
-) -> None:
+def normalize_lead(lead):
+    result = {}
 
-    create_csv_if_missing()
+    for header in CSV_HEADERS:
+        result[header] = clean(
+            lead.get(header, "")
+        )
+
+    return result
+
+
+def save_leads(leads):
+    ensure_csv()
 
     existing = read_csv()
-
     combined = {}
 
     for lead in existing:
         normalized = normalize_lead(lead)
-        key = get_lead_key(normalized)
+        key = lead_key(normalized)
 
         if key:
             combined[key] = normalized
 
     for lead in leads:
         normalized = normalize_lead(lead)
-        key = get_lead_key(normalized)
+        key = lead_key(normalized)
 
         if key:
             combined[key] = normalized
@@ -428,84 +343,75 @@ def save_csv(
         newline="",
         encoding="utf-8",
     ) as file:
-
         writer = csv.DictWriter(
             file,
             fieldnames=CSV_HEADERS,
         )
 
         writer.writeheader()
-        writer.writerows(combined.values())
+
+        for lead in combined.values():
+            writer.writerow(lead)
 
     print(
-        f"Saved {len(combined)} total leads "
-        f"to {DATA_FILE}"
+        f"CSV saved successfully. "
+        f"Total leads: {len(combined)}"
     )
 
 
-def deduplicate_leads(
-    leads: List[Dict[str, Any]]
-) -> List[Dict[str, str]]:
-
-    unique = {}
-
-    for lead in leads:
-        normalized = normalize_lead(lead)
-        key = get_lead_key(normalized)
-
-        if key and key not in unique:
-            unique[key] = normalized
-
-    return list(unique.values())
-
-
 # ============================================================
-# YOUTUBE SEARCHES
+# HTTP HELPER
 # ============================================================
 
-YOUTUBE_SEARCH_QUERIES = [
-    "Indian gaming creator",
-    "Indian tech creator",
-    "Indian gadget creator",
-    "Indian PC creator",
-    "Indian computer creator",
-    "Indian mobile creator",
-    "Indian lifestyle creator",
-    "Indian education creator",
-    "Indian entertainment creator",
-    "Indian fitness creator",
-    "Indian fashion creator",
-    "Indian travel creator",
-    "Indian finance creator",
-    "Indian automotive creator",
-    "Indian comedy creator",
-    "Indian vlogging creator",
-    "India gaming YouTuber",
-    "India tech YouTuber",
-    "India gadgets YouTuber",
-    "India PC YouTuber",
-    "India mobile YouTuber",
-    "India lifestyle YouTuber",
-    "India education YouTuber",
-    "India entertainment YouTuber",
-    "India fitness YouTuber",
-    "India fashion YouTuber",
-    "India travel YouTuber",
-    "India finance YouTuber",
-    "India automotive YouTuber",
-    "India comedy YouTuber",
-    "India vlogging YouTuber",
-]
+def get_json(url, params=None):
+    try:
+        response = requests.get(
+            url,
+            params=params or {},
+            timeout=REQUEST_TIMEOUT,
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except requests.RequestException as error:
+        print(f"API request error: {error}")
+        return {}
+
+    except ValueError as error:
+        print(f"JSON error: {error}")
+        return {}
 
 
 # ============================================================
 # YOUTUBE API
 # ============================================================
 
-def youtube_search(
-    query: str,
-    page_token: str = "",
-) -> Dict[str, Any]:
+YOUTUBE_SEARCHES = [
+    "Indian gaming YouTuber",
+    "Indian tech YouTuber",
+    "Indian gadget YouTuber",
+    "Indian PC YouTuber",
+    "Indian mobile YouTuber",
+    "Indian lifestyle YouTuber",
+    "Indian education YouTuber",
+    "Indian entertainment YouTuber",
+    "Indian fitness YouTuber",
+    "Indian fashion YouTuber",
+    "Indian travel YouTuber",
+    "Indian finance YouTuber",
+    "Indian automotive YouTuber",
+    "Indian comedy YouTuber",
+    "Indian vlogging YouTuber",
+]
+
+
+def youtube_search(query):
+    url = (
+        "https://www.googleapis.com/"
+        "youtube/v3/search"
+    )
 
     params = {
         "part": "snippet",
@@ -515,30 +421,28 @@ def youtube_search(
         "key": YOUTUBE_API_KEY,
     }
 
-    if page_token:
-        params["pageToken"] = page_token
-
-    return request_json(
-        f"{YOUTUBE_API_BASE}/search",
-        params=params,
-    )
+    return get_json(url, params)
 
 
-def youtube_get_channels(
-    channel_ids: List[str]
-) -> List[Dict[str, Any]]:
+def youtube_get_channels(channel_ids):
+    if not channel_ids:
+        return []
 
-    all_channels = []
+    channels = []
 
     for start in range(
         0,
         len(channel_ids),
         50,
     ):
-
         batch = channel_ids[
             start:start + 50
         ]
+
+        url = (
+            "https://www.googleapis.com/"
+            "youtube/v3/channels"
+        )
 
         params = {
             "part": (
@@ -550,42 +454,45 @@ def youtube_get_channels(
             "key": YOUTUBE_API_KEY,
         }
 
-        data = request_json(
-            f"{YOUTUBE_API_BASE}/channels",
-            params=params,
+        data = get_json(
+            url,
+            params,
         )
 
-        all_channels.extend(
+        channels.extend(
             data.get("items", [])
         )
 
-        time.sleep(
-            SLEEP_BETWEEN_REQUESTS
-        )
+        time.sleep(0.2)
 
-    return all_channels
+    return channels
 
 
-def youtube_latest_upload(
-    uploads_playlist_id: str
-) -> str:
-
-    if not uploads_playlist_id:
+def youtube_latest_upload(playlist_id):
+    if not playlist_id:
         return ""
+
+    url = (
+        "https://www.googleapis.com/"
+        "youtube/v3/playlistItems"
+    )
 
     params = {
         "part": "snippet",
-        "playlistId": uploads_playlist_id,
+        "playlistId": playlist_id,
         "maxResults": 1,
         "key": YOUTUBE_API_KEY,
     }
 
-    data = request_json(
-        f"{YOUTUBE_API_BASE}/playlistItems",
-        params=params,
+    data = get_json(
+        url,
+        params,
     )
 
-    items = data.get("items", [])
+    items = data.get(
+        "items",
+        [],
+    )
 
     if not items:
         return ""
@@ -596,77 +503,61 @@ def youtube_latest_upload(
     )
 
     return clean(
-        snippet.get("publishedAt", "")
+        snippet.get(
+            "publishedAt",
+            "",
+        )
     )
 
 
-def collect_youtube_leads() -> List[Dict[str, Any]]:
-
+def collect_youtube():
     if not YOUTUBE_API_KEY:
         print(
-            "YOUTUBE_API_KEY is missing. "
-            "Skipping YouTube."
+            "YOUTUBE_API_KEY is missing."
         )
         return []
 
     print(
-        "Starting YouTube lead collection..."
+        "Starting YouTube collection..."
     )
 
     channel_ids = set()
 
-    for query in YOUTUBE_SEARCH_QUERIES:
-
+    for query in YOUTUBE_SEARCHES:
         print(
-            f"YouTube search: {query}"
+            f"Searching YouTube: {query}"
         )
 
-        page_token = ""
+        data = youtube_search(
+            query
+        )
 
-        for _ in range(2):
-
-            data = youtube_search(
-                query,
-                page_token,
+        for item in data.get(
+            "items",
+            [],
+        ):
+            snippet = item.get(
+                "snippet",
+                {},
             )
 
-            for item in data.get(
-                "items",
-                [],
-            ):
-
-                channel_id = clean(
-                    item.get(
-                        "snippet",
-                        {},
-                    ).get(
-                        "channelId",
-                        "",
-                    )
-                )
-
-                if channel_id:
-                    channel_ids.add(
-                        channel_id
-                    )
-
-            page_token = clean(
-                data.get(
-                    "nextPageToken",
+            channel_id = clean(
+                snippet.get(
+                    "channelId",
                     "",
                 )
             )
 
-            if not page_token:
-                break
+            if channel_id:
+                channel_ids.add(
+                    channel_id
+                )
 
-            time.sleep(
-                SLEEP_BETWEEN_REQUESTS
-            )
+        time.sleep(0.2)
 
     print(
         f"Found {len(channel_ids)} "
-        "unique YouTube channels."
+        "YouTube channels."
     )
 
     channels = youtube_get_channels(
@@ -676,7 +567,6 @@ def collect_youtube_leads() -> List[Dict[str, Any]]:
     leads = []
 
     for channel in channels:
-
         snippet = channel.get(
             "snippet",
             {},
@@ -699,19 +589,18 @@ def collect_youtube_leads() -> List[Dict[str, Any]]:
             )
         )
 
-        if not (
-            MIN_SUBSCRIBERS
-            <= subscribers
-            <= MAX_SUBSCRIBERS
-        ):
+        if subscribers < MIN_SUBSCRIBERS:
+            continue
+
+        if subscribers > MAX_SUBSCRIBERS:
             continue
 
         channel_id = clean(
-            channel.get("id", "")
+            channel.get(
+                "id",
+                "",
+            )
         )
-
-        if not channel_id:
-            continue
 
         name = clean(
             snippet.get(
@@ -740,7 +629,6 @@ def collect_youtube_leads() -> List[Dict[str, Any]]:
         )
 
         if custom_url:
-
             if custom_url.startswith("@"):
                 profile_url = (
                     "https://www.youtube.com/"
@@ -751,24 +639,8 @@ def collect_youtube_leads() -> List[Dict[str, Any]]:
                     "https://www.youtube.com/@"
                     + custom_url
                 )
-
         else:
             profile_url = channel_url
-
-        email = extract_email(
-            description
-        )
-
-        country = clean(
-            snippet.get(
-                "country",
-                "",
-            )
-        )
-
-        niche = detect_niche(
-            f"{name} {description}"
-        )
 
         uploads_playlist = (
             content_details
@@ -786,44 +658,57 @@ def collect_youtube_leads() -> List[Dict[str, Any]]:
             uploads_playlist
         )
 
-        leads.append(
-            {
-                "name": name,
-                "platform": "YouTube",
-                "profile_url": profile_url,
-                "channel_url": channel_url,
-                "creator_or_business": "Creator",
-                "niche": niche,
-                "country": country or "India",
-                "city": "",
-                "subscribers": str(
-                    subscribers
-                ),
-                "avg_views": "",
-                "business_email": email,
-                "instagram": "",
-                "linkedin": "",
-                "twitter_x": "",
-                "website": "",
-                "recent_upload": recent_upload,
-                "contact_type": (
-                    "Business Email"
-                    if email
-                    else "Public Profile"
-                ),
-                "lead_source": (
-                    "YouTube Data API"
-                ),
-                "status": "New",
-                "notes": (
-                    "Public YouTube channel. "
-                    "Subscriber range: 10K-50K."
-                ),
-            }
+        email = extract_email(
+            description
         )
 
+        niche = detect_niche(
+            name + " " + description
+        )
+
+        lead = {
+            "name": name,
+            "platform": "YouTube",
+            "profile_url": profile_url,
+            "channel_url": channel_url,
+            "creator_or_business": "Creator",
+            "niche": niche,
+            "country": clean(
+                snippet.get(
+                    "country",
+                    "",
+                )
+            ) or "India",
+            "city": "",
+            "subscribers": str(
+                subscribers
+            ),
+            "avg_views": "",
+            "business_email": email,
+            "instagram": "",
+            "linkedin": "",
+            "twitter_x": "",
+            "website": "",
+            "recent_upload": recent_upload,
+            "contact_type": (
+                "Business Email"
+                if email
+                else "Public Profile"
+            ),
+            "lead_source": (
+                "YouTube Data API"
+            ),
+            "status": "New",
+            "notes": (
+                "Public YouTube channel. "
+                "Subscriber range matched."
+            ),
+        }
+
+        leads.append(lead)
+
     print(
-        f"YouTube leads after filtering: "
+        f"YouTube qualified leads: "
         f"{len(leads)}"
     )
 
@@ -831,137 +716,202 @@ def collect_youtube_leads() -> List[Dict[str, Any]]:
 
 
 # ============================================================
-# INSTAGRAM
+# GOOGLE SHEETS
 # ============================================================
 
-def collect_instagram_leads() -> List[Dict[str, Any]]:
-
-    if not INSTAGRAM_ACCESS_TOKEN:
+def upload_to_google_sheets(leads):
+    if not GOOGLE_SERVICE_ACCOUNT_JSON:
         print(
-            "INSTAGRAM_ACCESS_TOKEN not configured. "
-            "Skipping Instagram."
+            "Google service account secret "
+            "not configured. Skipping Sheets."
         )
-        return []
+        return
+
+    if not GOOGLE_SHEET_ID:
+        print(
+            "Google Sheet ID not configured. "
+            "Skipping Sheets."
+        )
+        return
+
+    if not leads:
+        print(
+            "No new leads to upload."
+        )
+        return
+
+    try:
+        import gspread
+        from google.oauth2.service_account import (
+            Credentials,
+        )
+
+        service_account_info = json.loads(
+            GOOGLE_SERVICE_ACCOUNT_JSON
+        )
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+
+        credentials = (
+            Credentials.from_service_account_info(
+                service_account_info,
+                scopes=scopes,
+            )
+        )
+
+        client = gspread.authorize(
+            credentials
+        )
+
+        spreadsheet = client.open_by_key(
+            GOOGLE_SHEET_ID
+        )
+
+        worksheet = spreadsheet.sheet1
+
+        worksheet.update(
+            "A1:T1",
+            [CSV_HEADERS],
+        )
+
+        existing_values = (
+            worksheet.get_all_values()
+        )
+
+        existing_keys = set()
+
+        for row_values in existing_values[1:]:
+            row = {}
+
+            for index, header in enumerate(
+                CSV_HEADERS
+            ):
+                if index < len(row_values):
+                    row[header] = row_values[index]
+                else:
+                    row[header] = ""
+
+            existing_keys.add(
+                lead_key(row)
+            )
+
+        rows_to_add = []
+
+        for lead in leads:
+            normalized = normalize_lead(
+                lead
+            )
+
+            key = lead_key(
+                normalized
+            )
+
+            if key in existing_keys:
+                continue
+
+            rows_to_add.append(
+                [
+                    normalized[header]
+                    for header in CSV_HEADERS
+                ]
+            )
+
+            existing_keys.add(key)
+
+        if not rows_to_add:
+            print(
+                "Google Sheet already "
+                "contains these leads."
+            )
+            return
+
+        worksheet.append_rows(
+            rows_to_add,
+            value_input_option="USER_ENTERED",
+        )
+
+        print(
+            f"Uploaded {len(rows_to_add)} "
+            "new leads to Google Sheets."
+        )
+
+    except Exception as error:
+        print(
+            f"Google Sheets error: {error}"
+        )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    print("=" * 60)
+    print("LEAD AUTOMATION STARTED")
+    print("=" * 60)
 
     print(
-        "Checking authorized Instagram account..."
+        f"CSV file: {DATA_FILE}"
     )
 
-    params = {
-        "fields": (
-            "id,username,name,biography,"
-            "website,followers_count"
-        ),
-        "access_token": (
-            INSTAGRAM_ACCESS_TOKEN
-        ),
-    }
+    ensure_csv()
 
-    data = request_json(
-        "https://graph.instagram.com/me",
-        params=params,
-    )
+    all_leads = []
 
-    if not data:
+    try:
+        youtube_leads = collect_youtube()
+        all_leads.extend(
+            youtube_leads
+        )
+    except Exception as error:
         print(
-            "Instagram account could not be read."
+            f"YouTube error: {error}"
         )
-        return []
 
-    username = clean(
-        data.get(
-            "username",
-            "",
+    unique = {}
+
+    for lead in all_leads:
+        normalized = normalize_lead(
+            lead
         )
+
+        key = lead_key(
+            normalized
+        )
+
+        if key:
+            unique[key] = normalized
+
+    final_leads = list(
+        unique.values()
     )
 
-    name = clean(
-        data.get(
-            "name",
-            "",
+    print(
+        f"Total new leads collected: "
+        f"{len(final_leads)}"
+    )
+
+    save_leads(
+        final_leads
+    )
+
+    try:
+        upload_to_google_sheets(
+            final_leads
         )
-    )
-
-    if not username:
-        return []
-
-    profile_url = (
-        "https://www.instagram.com/"
-        + username
-        + "/"
-    )
-
-    followers = safe_int(
-        data.get(
-            "followers_count",
-            0,
-        )
-    )
-
-    biography = clean(
-        data.get(
-            "biography",
-            "",
-        )
-    )
-
-    return [
-        {
-            "name": name or username,
-            "platform": "Instagram",
-            "profile_url": profile_url,
-            "channel_url": "",
-            "creator_or_business": (
-                "Creator/Business"
-            ),
-            "niche": detect_niche(
-                biography
-            ),
-            "country": "",
-            "city": "",
-            "subscribers": str(
-                followers
-            ),
-            "avg_views": "",
-            "business_email": extract_email(
-                biography
-            ),
-            "instagram": profile_url,
-            "linkedin": "",
-            "twitter_x": "",
-            "website": normalize_url(
-                data.get(
-                    "website",
-                    "",
-                )
-            ),
-            "recent_upload": "",
-            "contact_type": "Public Profile",
-            "lead_source": (
-                "Instagram Graph API"
-            ),
-            "status": "New",
-            "notes": (
-                "Authorized Instagram account "
-                "data only."
-            ),
-        }
-    ]
-
-
-# ============================================================
-# FACEBOOK
-# ============================================================
-
-def collect_facebook_leads() -> List[Dict[str, Any]]:
-
-    if not FACEBOOK_ACCESS_TOKEN:
+    except Exception as error:
         print(
-            "FACEBOOK_ACCESS_TOKEN not configured. "
-            "Skipping Facebook."
+            f"Google Sheets upload error: "
+            f"{error}"
         )
-        return []
 
-    if not FACEBOOK_PAGE_ID:
-        print(
- 
+    print("=" * 60)
+    print("LEAD AUTOMATION FINISHED")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
