@@ -32,7 +32,7 @@ DATA_FILE = DATA_DIR / "leads.csv"
 
 
 # ============================================================
-# FINAL 20-COLUMN SCHEMA
+# FINAL CSV SCHEMA - 20 COLUMNS
 # ============================================================
 
 CSV_HEADERS = [
@@ -73,7 +73,7 @@ YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3"
 
 
 # ============================================================
-# SECRETS / ENVIRONMENT
+# ENVIRONMENT / SECRETS
 # ============================================================
 
 YOUTUBE_API_KEY = os.getenv(
@@ -91,7 +91,6 @@ GOOGLE_SHEET_ID = os.getenv(
     ""
 ).strip()
 
-# Optional APIs
 INSTAGRAM_ACCESS_TOKEN = os.getenv(
     "INSTAGRAM_ACCESS_TOKEN",
     ""
@@ -114,7 +113,7 @@ X_BEARER_TOKEN = os.getenv(
 
 
 # ============================================================
-# HELPERS
+# GENERAL HELPERS
 # ============================================================
 
 def clean(value: Any) -> str:
@@ -134,9 +133,7 @@ def normalize_url(url: Any) -> str:
     if not url:
         return ""
 
-    if not url.startswith(
-        ("http://", "https://")
-    ):
+    if not url.startswith(("http://", "https://")):
         return "https://" + url
 
     return url
@@ -161,11 +158,7 @@ def extract_email(text: str) -> str:
         flags=re.IGNORECASE,
     )
 
-    return (
-        matches[0].lower()
-        if matches
-        else ""
-    )
+    return matches[0].lower() if matches else ""
 
 
 def detect_niche(text: str) -> str:
@@ -294,15 +287,13 @@ def ensure_csv() -> None:
         exist_ok=True
     )
 
-    if (
-        not DATA_FILE.exists()
-        or DATA_FILE.stat().st_size == 0
-    ):
+    if not DATA_FILE.exists() or DATA_FILE.stat().st_size == 0:
         with DATA_FILE.open(
             "w",
             newline="",
             encoding="utf-8"
         ) as file:
+
             writer = csv.DictWriter(
                 file,
                 fieldnames=CSV_HEADERS
@@ -319,15 +310,14 @@ def read_csv() -> List[Dict[str, str]]:
         newline="",
         encoding="utf-8"
     ) as file:
+
         reader = csv.DictReader(file)
 
         rows = []
 
         for row in reader:
             rows.append({
-                header: clean(
-                    row.get(header, "")
-                )
+                header: clean(row.get(header, ""))
                 for header in CSV_HEADERS
             })
 
@@ -473,7 +463,7 @@ def youtube_request(
 
 def youtube_queries() -> List[str]:
 
-    india = [
+    india_queries = [
         "Indian gaming creator",
         "Indian tech creator",
         "Indian gadgets creator",
@@ -492,7 +482,7 @@ def youtube_queries() -> List[str]:
         "Indian vlogging creator",
     ]
 
-    international = [
+    international_queries = [
         "gaming creator",
         "tech creator",
         "gadgets creator",
@@ -511,7 +501,7 @@ def youtube_queries() -> List[str]:
         "vlogging creator",
     ]
 
-    return india + international
+    return india_queries + international_queries
 
 
 def youtube_search(
@@ -539,10 +529,8 @@ def youtube_search(
             params
         )
 
-        for item in data.get(
-            "items",
-            []
-        ):
+        for item in data.get("items", []):
+
             channel_id = (
                 item
                 .get("snippet", {})
@@ -601,10 +589,7 @@ def youtube_channels(
         )
 
         results.extend(
-            data.get(
-                "items",
-                []
-            )
+            data.get("items", [])
         )
 
         time.sleep(
@@ -629,10 +614,7 @@ def youtube_latest_upload(
         }
     )
 
-    items = data.get(
-        "items",
-        []
-    )
+    items = data.get("items", [])
 
     if not items:
         return ""
@@ -735,16 +717,14 @@ def make_youtube_lead(
         description
     )
 
-    keywords = (
+    keywords = clean(
         branding
         .get("channel", {})
         .get("keywords", "")
     )
 
-    recent_upload = (
-        youtube_latest_upload(
-            channel_id
-        )
+    recent_upload = youtube_latest_upload(
+        channel_id
     )
 
     return {
@@ -772,9 +752,9 @@ def make_youtube_lead(
         "lead_source": "YouTube Data API",
         "status": "New",
         "notes": (
-            f"Public YouTube channel. "
+            "Public YouTube channel. "
             f"Video count: {video_count}. "
-            f"Keywords: {clean(keywords)}"
+            f"Keywords: {keywords}"
         ),
     }
 
@@ -966,8 +946,8 @@ def collect_facebook() -> List[Dict[str, Any]]:
 
     try:
         response = requests.get(
-            f"https://graph.facebook.com/"
-            f"v23.0/{FACEBOOK_PAGE_ID}",
+            f"https://graph.facebook.com/v23.0/"
+            f"{FACEBOOK_PAGE_ID}",
             params={
                 "fields":
                     "id,name,link,website,about,location",
@@ -994,35 +974,36 @@ def collect_facebook() -> List[Dict[str, Any]]:
         )
 
         city = clean(
-            location.get(
-                "city",
-                ""
-            )
+            location.get("city", "")
         )
 
         about = clean(
-            data.get(
-                "about",
-                ""
-            )
+            data.get("about", "")
         )
 
         profile = normalize_url(
-            data.get(
-                "link",
-                ""
-            )
+            data.get("link", "")
         )
 
         website = normalize_url(
-            data.get(
-                "website",
-                ""
-            )
+            data.get("website", "")
+        )
+
+        email = extract_email(
+            about
         )
 
         return [
             {
                 "name": name,
                 "platform": "Facebook",
-   
+                "profile_url": profile,
+                "channel_url": "",
+                "creator_or_business":
+                    "Business",
+                "niche": detect_niche(about),
+                "country": "",
+                "city": city,
+                "subscribers": "",
+                "avg_views": "",
+         
