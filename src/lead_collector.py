@@ -7,12 +7,10 @@ import time
 from typing import Any, Dict, List
 
 import requests
-import gspread
-from google.oauth2.service_account import Credentials
 
 
 # ============================================================
-# PROJECT
+# PROJECT PATHS
 # ============================================================
 
 def get_project_root() -> Path:
@@ -22,17 +20,15 @@ def get_project_root() -> Path:
         if (parent / "requirements.txt").exists():
             return parent
 
-    return current.parent
+    return current.parent.parent
 
 
 PROJECT_ROOT = get_project_root()
-
-DATA_DIR = PROJECT_ROOT / "data"
-DATA_FILE = DATA_DIR / "leads.csv"
+DATA_FILE = PROJECT_ROOT / "data" / "leads.csv"
 
 
 # ============================================================
-# CSV HEADERS - FINAL 20 COLUMNS
+# CSV HEADERS
 # ============================================================
 
 CSV_HEADERS = [
@@ -67,64 +63,47 @@ MIN_SUBSCRIBERS = 10_000
 MAX_SUBSCRIBERS = 50_000
 
 REQUEST_TIMEOUT = 30
-REQUEST_DELAY = 0.2
+SLEEP_BETWEEN_REQUESTS = 0.2
 
-YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3"
+YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
 # ============================================================
-# SECRETS
+# ENVIRONMENT VARIABLES
 # ============================================================
 
-YOUTUBE_API_KEY = os.getenv(
-    "YOUTUBE_API_KEY",
-    ""
-).strip()
-
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv(
-    "GOOGLE_SERVICE_ACCOUNT_JSON",
-    ""
+    "GOOGLE_SERVICE_ACCOUNT_JSON", ""
 ).strip()
-
-GOOGLE_SHEET_ID = os.getenv(
-    "GOOGLE_SHEET_ID",
-    ""
-).strip()
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
 
 INSTAGRAM_ACCESS_TOKEN = os.getenv(
-    "INSTAGRAM_ACCESS_TOKEN",
-    ""
+    "INSTAGRAM_ACCESS_TOKEN", ""
 ).strip()
 
 FACEBOOK_ACCESS_TOKEN = os.getenv(
-    "FACEBOOK_ACCESS_TOKEN",
-    ""
+    "FACEBOOK_ACCESS_TOKEN", ""
 ).strip()
 
 FACEBOOK_PAGE_ID = os.getenv(
-    "FACEBOOK_PAGE_ID",
-    ""
+    "FACEBOOK_PAGE_ID", ""
 ).strip()
 
 X_BEARER_TOKEN = os.getenv(
-    "X_BEARER_TOKEN",
-    ""
+    "X_BEARER_TOKEN", ""
 ).strip()
 
 
 # ============================================================
-# HELPERS
+# GENERAL HELPERS
 # ============================================================
 
 def clean(value: Any) -> str:
     if value is None:
         return ""
 
-    return re.sub(
-        r"\s+",
-        " ",
-        str(value)
-    ).strip()
+    return str(value).strip()
 
 
 def normalize_url(url: Any) -> str:
@@ -134,9 +113,9 @@ def normalize_url(url: Any) -> str:
         return ""
 
     if not url.startswith(("http://", "https://")):
-        return "https://" + url
+        url = "https://" + url
 
-    return url
+    return url.rstrip("/")
 
 
 def safe_int(value: Any) -> int:
@@ -146,75 +125,156 @@ def safe_int(value: Any) -> int:
         return 0
 
 
-def extract_email(text: str) -> str:
+def extract_email(text: Any) -> str:
     text = clean(text)
 
     if not text:
         return ""
 
-    matches = re.findall(
-        r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
-        text,
-        flags=re.IGNORECASE,
-    )
+    pattern = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
 
-    return matches[0].lower() if matches else ""
+    matches = re.findall(pattern, text)
+
+    if not matches:
+        return ""
+
+    # Remove obvious fake/example addresses.
+    for email in matches:
+        lower = email.lower()
+
+        if any(
+            bad in lower
+            for bad in [
+                "example.com",
+                "example.org",
+                "example.net",
+                "test.com",
+                "email.com",
+            ]
+        ):
+            continue
+
+        return email
+
+    return ""
 
 
-def detect_niche(text: str) -> str:
+def detect_niche(text: Any) -> str:
     text = clean(text).lower()
 
     niche_keywords = {
         "Gaming": [
-            "gaming", "gamer", "gameplay", "minecraft",
-            "valorant", "bgmi", "pubg", "free fire",
-            "gta", "esports"
+            "gaming",
+            "gamer",
+            "gameplay",
+            "minecraft",
+            "valorant",
+            "bgmi",
+            "pubg",
+            "free fire",
+            "esports",
         ],
         "Tech": [
-            "tech", "technology", "software", "computer"
+            "technology",
+            "tech",
+            "smartphone",
+            "smartphones",
+            "mobile",
+            "android",
+            "iphone",
+            "software",
         ],
         "Gadgets": [
-            "gadget", "gadgets", "unboxing", "accessories"
+            "gadget",
+            "gadgets",
+            "unboxing",
+            "review",
+            "reviews",
+            "accessories",
         ],
         "PC/Computer": [
-            "pc build", "pc", "computer", "laptop", "desktop"
-        ],
-        "Mobile": [
-            "mobile", "android", "iphone", "ios", "smartphone"
+            "pc",
+            "computer",
+            "laptop",
+            "desktop",
+            "cpu",
+            "gpu",
+            "windows",
+            "macbook",
         ],
         "Lifestyle": [
-            "lifestyle", "routine", "daily life"
+            "lifestyle",
+            "daily life",
+            "routine",
+            "self care",
         ],
         "Education": [
-            "education", "educational", "study",
-            "learning", "tutorial"
+            "education",
+            "educational",
+            "study",
+            "learning",
+            "tutorial",
+            "career",
         ],
         "Entertainment": [
-            "entertainment", "movie", "movies",
-            "film", "reaction"
+            "entertainment",
+            "celebrity",
+            "movie",
+            "movies",
+            "film",
+            "web series",
         ],
         "Fitness": [
-            "fitness", "gym", "workout", "bodybuilding"
+            "fitness",
+            "workout",
+            "gym",
+            "bodybuilding",
+            "health",
         ],
         "Fashion": [
-            "fashion", "style", "outfit", "beauty"
+            "fashion",
+            "style",
+            "makeup",
+            "beauty",
+            "clothing",
         ],
         "Travel": [
-            "travel", "travelling", "trip", "tour"
+            "travel",
+            "travelling",
+            "tour",
+            "trip",
+            "vlog travel",
         ],
         "Finance": [
-            "finance", "investing", "investment",
-            "stock", "money", "trading"
+            "finance",
+            "stock market",
+            "stocks",
+            "investing",
+            "investment",
+            "trading",
+            "money",
         ],
         "Automotive": [
-            "automotive", "car", "cars",
-            "bike", "motorcycle", "auto"
+            "automotive",
+            "car",
+            "cars",
+            "bike",
+            "bikes",
+            "motorcycle",
+            "automobile",
         ],
         "Comedy": [
-            "comedy", "funny", "humor", "sketch"
+            "comedy",
+            "funny",
+            "standup",
+            "stand-up",
+            "humor",
         ],
         "Vlogging": [
-            "vlog", "vlogging", "daily vlog"
+            "vlog",
+            "vlogging",
+            "daily vlog",
+            "life vlog",
         ],
     }
 
@@ -223,315 +283,301 @@ def detect_niche(text: str) -> str:
             if keyword in text:
                 return niche
 
-    return ""
+    return "Other"
+
+
+def request_json(
+    url: str,
+    params: Dict[str, Any] = None,
+    headers: Dict[str, str] = None,
+) -> Dict[str, Any]:
+    try:
+        response = requests.get(
+            url,
+            params=params or {},
+            headers=headers or {},
+            timeout=REQUEST_TIMEOUT,
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except requests.RequestException as exc:
+        print(f"Request failed: {exc}")
+        return {}
+
+    except ValueError as exc:
+        print(f"Invalid JSON response: {exc}")
+        return {}
 
 
 # ============================================================
-# CSV
+# CSV FUNCTIONS
 # ============================================================
 
 def ensure_csv() -> None:
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     if not DATA_FILE.exists() or DATA_FILE.stat().st_size == 0:
         with DATA_FILE.open(
             "w",
             newline="",
-            encoding="utf-8"
+            encoding="utf-8",
         ) as file:
             writer = csv.DictWriter(
                 file,
-                fieldnames=CSV_HEADERS
+                fieldnames=CSV_HEADERS,
+            )
+            writer.writeheader()
+
+        return
+
+    # Make sure the existing CSV has the correct header.
+    try:
+        with DATA_FILE.open(
+            "r",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            reader = csv.reader(file)
+            first_row = next(reader, [])
+
+        if first_row != CSV_HEADERS:
+            print("Updating leads.csv header...")
+
+            rows = read_csv()
+
+            with DATA_FILE.open(
+                "w",
+                newline="",
+                encoding="utf-8",
+            ) as file:
+                writer = csv.DictWriter(
+                    file,
+                    fieldnames=CSV_HEADERS,
+                )
+
+                writer.writeheader()
+
+                for row in rows:
+                    writer.writerow(
+                        normalize_lead(row)
+                    )
+
+    except Exception as exc:
+        print(f"CSV header check failed: {exc}")
+
+
+def read_csv() -> List[Dict[str, str]]:
+    ensure_exists_only()
+
+    try:
+        with DATA_FILE.open(
+            "r",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            reader = csv.DictReader(file)
+
+            return [
+                normalize_lead(row)
+                for row in reader
+                if row
+            ]
+
+    except Exception as exc:
+        print(f"Could not read CSV: {exc}")
+        return []
+
+
+def ensure_exists_only() -> None:
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    if not DATA_FILE.exists():
+        with DATA_FILE.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=CSV_HEADERS,
             )
             writer.writeheader()
 
 
-def read_csv() -> List[Dict[str, str]]:
-    ensure_csv()
+def normalize_lead(row: Dict[str, Any]) -> Dict[str, str]:
+    result = {}
 
-    with DATA_FILE.open(
-        "r",
-        newline="",
-        encoding="utf-8"
-    ) as file:
-        reader = csv.DictReader(file)
+    for header in CSV_HEADERS:
+        result[header] = clean(row.get(header, ""))
 
-        return [
-            {
-                header: clean(row.get(header, ""))
-                for header in CSV_HEADERS
-            }
-            for row in reader
-        ]
+    return result
 
 
-def normalize_lead(
-    lead: Dict[str, Any]
-) -> Dict[str, str]:
+def get_lead_key(row: Dict[str, Any]) -> str:
+    row = normalize_lead(row)
 
-    row = {
-        header: clean(lead.get(header, ""))
-        for header in CSV_HEADERS
-    }
+    platform = row["platform"].lower()
+    profile_url = normalize_url(row["profile_url"]).lower()
+    channel_url = normalize_url(row["channel_url"]).lower()
 
-    for field in [
-        "profile_url",
-        "channel_url",
-        "instagram",
-        "linkedin",
-        "twitter_x",
-        "website",
-    ]:
-        row[field] = normalize_url(row[field])
+    if profile_url:
+        return f"{platform}|{profile_url}"
 
-    return row
+    if channel_url:
+        return f"{platform}|{channel_url}"
+
+    return (
+        f"{platform}|"
+        f"{row['name'].lower()}|"
+        f"{row['business_email'].lower()}"
+    )
 
 
-def get_lead_key(
-    lead: Dict[str, Any]
-) -> str:
-
-    platform = clean(
-        lead.get("platform", "")
-    ).lower()
-
-    profile = normalize_url(
-        lead.get("profile_url", "")
-    ).lower()
-
-    channel = normalize_url(
-        lead.get("channel_url", "")
-    ).lower()
-
-    name = clean(
-        lead.get("name", "")
-    ).lower()
-
-    if profile:
-        return f"{platform}|{profile}"
-
-    if channel:
-        return f"{platform}|{channel}"
-
-    return f"{platform}|{name}"
-
-
-def save_csv(
-    leads: List[Dict[str, Any]]
-) -> int:
-
+def save_csv(leads: List[Dict[str, Any]]) -> None:
     ensure_csv()
 
     existing = read_csv()
 
-    existing_keys = {
-        get_lead_key(row)
-        for row in existing
-    }
+    combined: Dict[str, Dict[str, str]] = {}
 
-    new_rows = []
+    for row in existing:
+        normalized = normalize_lead(row)
+        combined[get_lead_key(normalized)] = normalized
 
-    for lead in leads:
-        row = normalize_lead(lead)
-        key = get_lead_key(row)
+    for row in leads:
+        normalized = normalize_lead(row)
+        key = get_lead_key(normalized)
 
-        if key in existing_keys:
-            continue
+        if key:
+            combined[key] = normalized
 
-        existing_keys.add(key)
-        new_rows.append(row)
-
-    if not new_rows:
-        return 0
+    final_rows = list(combined.values())
 
     with DATA_FILE.open(
-        "a",
+        "w",
         newline="",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         writer = csv.DictWriter(
             file,
-            fieldnames=CSV_HEADERS
+            fieldnames=CSV_HEADERS,
         )
 
-        writer.writerows(new_rows)
+        writer.writeheader()
+        writer.writerows(final_rows)
 
-    return len(new_rows)
+    print(f"Saved {len(final_rows)} total leads to {DATA_FILE}")
 
 
 # ============================================================
 # YOUTUBE
 # ============================================================
 
-def youtube_request(
-    endpoint: str,
-    params: Dict[str, Any]
-) -> Dict[str, Any]:
-
-    if not YOUTUBE_API_KEY:
-        return {}
-
-    request_params = dict(params)
-    request_params["key"] = YOUTUBE_API_KEY
-
-    try:
-        response = requests.get(
-            f"{YOUTUBE_API_URL}/{endpoint}",
-            params=request_params,
-            timeout=REQUEST_TIMEOUT
-        )
-
-        response.raise_for_status()
-        return response.json()
-
-    except requests.RequestException as error:
-        print(f"YouTube API error: {error}")
-        return {}
-
-
-def youtube_queries() -> List[str]:
-
-    india = [
-        "Indian gaming creator",
-        "Indian tech creator",
-        "Indian gadgets creator",
-        "Indian PC creator",
-        "Indian computer creator",
-        "Indian mobile creator",
-        "Indian lifestyle creator",
-        "Indian education creator",
-        "Indian entertainment creator",
-        "Indian fitness creator",
-        "Indian fashion creator",
-        "Indian travel creator",
-        "Indian finance creator",
-        "Indian automotive creator",
-        "Indian comedy creator",
-        "Indian vlogging creator",
-    ]
-
-    international = [
-        "gaming creator",
-        "tech creator",
-        "gadgets creator",
-        "PC creator",
-        "computer creator",
-        "mobile creator",
-        "lifestyle creator",
-        "education creator",
-        "entertainment creator",
-        "fitness creator",
-        "fashion creator",
-        "travel creator",
-        "finance creator",
-        "automotive creator",
-        "comedy creator",
-        "vlogging creator",
-    ]
-
-    return india + international
+YOUTUBE_SEARCH_QUERIES = [
+    "Indian gaming creator",
+    "Indian tech creator",
+    "Indian gadget creator",
+    "Indian PC creator",
+    "Indian computer creator",
+    "Indian mobile creator",
+    "Indian lifestyle creator",
+    "Indian education creator",
+    "Indian entertainment creator",
+    "Indian fitness creator",
+    "Indian fashion creator",
+    "Indian travel creator",
+    "Indian finance creator",
+    "Indian automotive creator",
+    "Indian comedy creator",
+    "Indian vlogging creator",
+    "India gaming YouTuber",
+    "India tech YouTuber",
+    "India gadgets YouTuber",
+    "India PC YouTuber",
+    "India mobile YouTuber",
+    "India lifestyle YouTuber",
+    "India education YouTuber",
+    "India entertainment YouTuber",
+    "India fitness YouTuber",
+    "India fashion YouTuber",
+    "India travel YouTuber",
+    "India finance YouTuber",
+    "India automotive YouTuber",
+    "India comedy YouTuber",
+    "India vlogging YouTuber",
+]
 
 
 def youtube_search(
     query: str,
-    pages: int = 2
-) -> List[str]:
+    page_token: str = "",
+) -> Dict[str, Any]:
+    params = {
+        "part": "snippet",
+        "q": query,
+        "type": "channel",
+        "maxResults": 50,
+        "key": YOUTUBE_API_KEY,
+    }
 
-    channel_ids = []
-    page_token = ""
+    if page_token:
+        params["pageToken"] = page_token
 
-    for _ in range(pages):
-
-        params = {
-            "part": "snippet",
-            "q": query,
-            "type": "channel",
-            "maxResults": 50,
-        }
-
-        if page_token:
-            params["pageToken"] = page_token
-
-        data = youtube_request(
-            "search",
-            params
-        )
-
-        for item in data.get("items", []):
-
-            channel_id = (
-                item
-                .get("snippet", {})
-                .get("channelId", "")
-            )
-
-            if channel_id:
-                channel_ids.append(channel_id)
-
-        page_token = data.get(
-            "nextPageToken",
-            ""
-        )
-
-        if not page_token:
-            break
-
-        time.sleep(REQUEST_DELAY)
-
-    return list(dict.fromkeys(channel_ids))
+    return request_json(
+        f"{YOUTUBE_API_BASE}/search",
+        params=params,
+    )
 
 
 def youtube_channels(
-    channel_ids: List[str]
+    channel_ids: List[str],
 ) -> List[Dict[str, Any]]:
+    if not channel_ids:
+        return []
 
-    results = []
+    channels = []
 
+    # YouTube allows up to 50 IDs per request.
     for start in range(0, len(channel_ids), 50):
+        batch = channel_ids[start:start + 50]
 
-        batch = channel_ids[
-            start:start + 50
-        ]
+        params = {
+            "part": "snippet,statistics,contentDetails",
+            "id": ",".join(batch),
+            "key": YOUTUBE_API_KEY,
+        }
 
-        data = youtube_request(
-            "channels",
-            {
-                "part": (
-                    "snippet,"
-                    "statistics,"
-                    "brandingSettings"
-                ),
-                "id": ",".join(batch),
-                "maxResults": 50,
-            }
+        data = request_json(
+            f"{YOUTUBE_API_BASE}/channels",
+            params=params,
         )
 
-        results.extend(
-            data.get("items", [])
-        )
+        channels.extend(data.get("items", []))
 
-        time.sleep(REQUEST_DELAY)
+        time.sleep(SLEEP_BETWEEN_REQUESTS)
 
-    return results
+    return channels
 
 
 def youtube_latest_upload(
-    channel_id: str
+    uploads_playlist_id: str,
 ) -> str:
+    if not uploads_playlist_id:
+        return ""
 
-    data = youtube_request(
-        "search",
-        {
-            "part": "snippet",
-            "channelId": channel_id,
-            "type": "video",
-            "order": "date",
-            "maxResults": 1,
-        }
+    params = {
+        "part": "snippet",
+        "playlistId": uploads_playlist_id,
+        "maxResults": 1,
+        "key": YOUTUBE_API_KEY,
+    }
+
+    data = request_json(
+        f"{YOUTUBE_API_BASE}/playlistItems",
+        params=params,
     )
 
     items = data.get("items", [])
@@ -539,193 +585,170 @@ def youtube_latest_upload(
     if not items:
         return ""
 
-    return clean(
-        items[0]
-        .get("snippet", {})
-        .get("publishedAt", "")
-    )
+    snippet = items[0].get("snippet", {})
+
+    return clean(snippet.get("publishedAt", ""))
 
 
-def make_youtube_lead(
-    channel: Dict[str, Any]
-) -> Dict[str, Any]:
-
-    snippet = channel.get(
-        "snippet",
-        {}
-    )
-
-    statistics = channel.get(
-        "statistics",
-        {}
-    )
-
-    branding = channel.get(
-        "brandingSettings",
-        {}
-    )
-
-    channel_id = clean(
-        channel.get("id", "")
-    )
-
-    name = clean(
-        snippet.get("title", "")
-    )
-
-    description = clean(
-        snippet.get("description", "")
-    )
-
-    country_code = clean(
-        snippet.get("country", "")
-    )
-
-    subscribers = safe_int(
-        statistics.get(
-            "subscriberCount",
-            0
-        )
-    )
-
-    video_count = safe_int(
-        statistics.get(
-            "videoCount",
-            0
-        )
-    )
-
-    profile_url = (
-        f"https://www.youtube.com/channel/{channel_id}"
-    )
-
-    custom_url = clean(
-        snippet.get("customUrl", "")
-    )
-
-    if custom_url:
-        profile_url = (
-            "https://www.youtube.com/"
-            + custom_url.lstrip("@")
-        )
-
-    combined_text = (
-        f"{name} {description}"
-    )
-
-    niche = detect_niche(
-        combined_text
-    )
-
-    is_india = (
-        country_code.upper() == "IN"
-        or "india" in combined_text.lower()
-        or "indian" in combined_text.lower()
-    )
-
-    country = (
-        "India"
-        if is_india
-        else country_code
-    )
-
-    email = extract_email(
-        description
-    )
-
-    keywords = clean(
-        branding
-        .get("channel", {})
-        .get("keywords", "")
-    )
-
-    recent_upload = youtube_latest_upload(
-        channel_id
-    )
-
-    return {
-        "name": name,
-        "platform": "YouTube",
-        "profile_url": profile_url,
-        "channel_url": profile_url,
-        "creator_or_business": "Creator",
-        "niche": niche,
-        "country": country,
-        "city": "",
-        "subscribers": str(subscribers),
-        "avg_views": "",
-        "business_email": email,
-        "instagram": "",
-        "linkedin": "",
-        "twitter_x": "",
-        "website": "",
-        "recent_upload": recent_upload,
-        "contact_type": (
-            "Business email"
-            if email
-            else "Public profile"
-        ),
-        "lead_source": "YouTube Data API",
-        "status": "New",
-        "notes": (
-            "Public YouTube channel. "
-            f"Video count: {video_count}. "
-            f"Keywords: {keywords}"
-        ),
-    }
-
-
-def collect_youtube() -> List[Dict[str, Any]]:
-
+def collect_youtube_leads() -> List[Dict[str, Any]]:
     if not YOUTUBE_API_KEY:
-        print("YouTube: API key missing.")
+        print("YOUTUBE_API_KEY is missing. Skipping YouTube.")
         return []
 
-    print("YouTube: collecting channels...")
+    print("Starting YouTube lead collection...")
 
-    channel_ids = []
+    channel_ids = set()
 
-    for query in youtube_queries():
-
+    for query in YOUTUBE_SEARCH_QUERIES:
         print(f"YouTube search: {query}")
 
-        channel_ids.extend(
-            youtube_search(
-                query,
-                pages=2
-            )
-        )
+        next_page = ""
 
-    channel_ids = list(
-        dict.fromkeys(channel_ids)
-    )
+        # Two pages per query.
+        for _ in range(2):
+            data = youtube_search(
+                query=query,
+                page_token=next_page,
+            )
+
+            for item in data.get("items", []):
+                channel_id = (
+                    item.get("snippet", {})
+                    .get("channelId", "")
+                )
+
+                if channel_id:
+                    channel_ids.add(channel_id)
+
+            next_page = data.get(
+                "nextPageToken",
+                "",
+            )
+
+            if not next_page:
+                break
+
+            time.sleep(SLEEP_BETWEEN_REQUESTS)
 
     print(
-        f"YouTube channels found: {len(channel_ids)}"
+        f"Found {len(channel_ids)} unique YouTube channels "
+        "before subscriber filtering."
     )
 
     channels = youtube_channels(
-        channel_ids
+        list(channel_ids)
     )
 
     leads = []
 
     for channel in channels:
-
-        subscribers = safe_int(
-            channel
-            .get("statistics", {})
-            .get("subscriberCount", 0)
+        snippet = channel.get("snippet", {})
+        statistics = channel.get("statistics", {})
+        content_details = channel.get(
+            "contentDetails",
+            {},
         )
 
-        if MIN_SUBSCRIBERS <= subscribers <= MAX_SUBSCRIBERS:
+        subscriber_count = safe_int(
+            statistics.get("subscriberCount", 0)
+        )
 
-            leads.append(
-                make_youtube_lead(channel)
-            )
+        if not (
+            MIN_SUBSCRIBERS
+            <= subscriber_count
+            <= MAX_SUBSCRIBERS
+        ):
+            continue
+
+        channel_id = clean(
+            channel.get("id", "")
+        )
+
+        if not channel_id:
+            continue
+
+        title = clean(
+            snippet.get("title", "")
+        )
+
+        description = clean(
+            snippet.get("description", "")
+        )
+
+        custom_url = clean(
+            snippet.get("customUrl", "")
+        )
+
+        channel_url = (
+            f"https://www.youtube.com/channel/{channel_id}"
+        )
+
+        if custom_url:
+            if custom_url.startswith("@"):
+                profile_url = (
+                    f"https://www.youtube.com/{custom_url}"
+                )
+            else:
+                profile_url = (
+                    f"https://www.youtube.com/@{custom_url}"
+                )
+        else:
+            profile_url = channel_url
+
+        email = extract_email(description)
+
+        country = clean(
+            snippet.get("country", "")
+        )
+
+        niche = detect_niche(
+            f"{title} {description}"
+        )
+
+        uploads_playlist_id = (
+            content_details
+            .get("relatedPlaylists", {})
+            .get("uploads", "")
+        )
+
+        recent_upload = youtube_latest_upload(
+            uploads_playlist_id
+        )
+
+        lead = {
+            "name": title,
+            "platform": "YouTube",
+            "profile_url": profile_url,
+            "channel_url": channel_url,
+            "creator_or_business": "Creator",
+            "niche": niche,
+            "country": country or "India",
+            "city": "",
+            "subscribers": str(subscriber_count),
+            "avg_views": "",
+            "business_email": email,
+            "instagram": "",
+            "linkedin": "",
+            "twitter_x": "",
+            "website": "",
+            "recent_upload": recent_upload,
+            "contact_type": (
+                "Business Email"
+                if email
+                else "Public Profile"
+            ),
+            "lead_source": "YouTube Data API",
+            "status": "New",
+            "notes": (
+                "Public YouTube channel. "
+                "Subscriber range matched 10K-50K."
+            ),
+        }
+
+        leads.append(lead)
 
     print(
-        f"YouTube qualifying leads: {len(leads)}"
+        f"YouTube leads after filtering: {len(leads)}"
     )
 
     return leads
@@ -735,232 +758,122 @@ def collect_youtube() -> List[Dict[str, Any]]:
 # INSTAGRAM
 # ============================================================
 
-def collect_instagram() -> List[Dict[str, Any]]:
-
+def collect_instagram_leads() -> List[Dict[str, Any]]:
     if not INSTAGRAM_ACCESS_TOKEN:
         print(
-            "Instagram: API token not configured. Skipping."
+            "INSTAGRAM_ACCESS_TOKEN not configured. "
+            "Skipping Instagram."
         )
         return []
 
-    print(
-        "Instagram: authorized API detected."
+    print("Checking authorized Instagram account...")
+
+    headers = {
+        "Authorization": (
+            f"Bearer {INSTAGRAM_ACCESS_TOKEN}"
+        )
+    }
+
+    params = {
+        "fields": (
+            "id,username,name,biography,"
+            "website,followers_count"
+        ),
+        "access_token": INSTAGRAM_ACCESS_TOKEN,
+    }
+
+    data = request_json(
+        "https://graph.instagram.com/me",
+        params=params,
+        headers=headers,
     )
 
-    try:
-
-        response = requests.get(
-            "https://graph.instagram.com/me",
-            params={
-                "fields": (
-                    "id,username,name,"
-                    "account_type,media_count"
-                ),
-                "access_token": INSTAGRAM_ACCESS_TOKEN,
-            },
-            timeout=REQUEST_TIMEOUT
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        username = clean(
-            data.get("username", "")
-        )
-
-        name = clean(
-            data.get("name", "")
-        ) or username
-
-        if not username:
-            return []
-
-        profile = (
-            f"https://www.instagram.com/{username}/"
-        )
-
-        return [{
-            "name": name,
-            "platform": "Instagram",
-            "profile_url": profile,
-            "channel_url": "",
-            "creator_or_business": "Creator/Business",
-            "niche": "",
-            "country": "",
-            "city": "",
-            "subscribers": "",
-            "avg_views": "",
-            "business_email": "",
-            "instagram": profile,
-            "linkedin": "",
-            "twitter_x": "",
-            "website": "",
-            "recent_upload": "",
-            "contact_type": "Public profile",
-            "lead_source": "Instagram Graph API",
-            "status": "New",
-            "notes": "Authorized account data.",
-        }]
-
-    except requests.RequestException as error:
-
-        print(
-            f"Instagram API error: {error}"
-        )
-
+    if not data:
+        print("Instagram account could not be read.")
         return []
+
+    username = clean(data.get("username", ""))
+    name = clean(data.get("name", ""))
+
+    if not username:
+        return []
+
+    followers = safe_int(
+        data.get("followers_count", 0)
+    )
+
+    profile_url = (
+        f"https://www.instagram.com/{username}/"
+    )
+
+    lead = {
+        "name": name or username,
+        "platform": "Instagram",
+        "profile_url": profile_url,
+        "channel_url": "",
+        "creator_or_business": "Creator/Business",
+        "niche": detect_niche(
+            data.get("biography", "")
+        ),
+        "country": "",
+        "city": "",
+        "subscribers": str(followers),
+        "avg_views": "",
+        "business_email": extract_email(
+            data.get("biography", "")
+        ),
+        "instagram": profile_url,
+        "linkedin": "",
+        "twitter_x": "",
+        "website": normalize_url(
+            data.get("website", "")
+        ),
+        "recent_upload": "",
+        "contact_type": "Public Profile",
+        "lead_source": "Instagram Graph API",
+        "status": "New",
+        "notes": (
+            "Authorized Instagram account data. "
+            "This collector does not scrape arbitrary private accounts."
+        ),
+    }
+
+    return [lead]
 
 
 # ============================================================
 # FACEBOOK
 # ============================================================
 
-def collect_facebook() -> List[Dict[str, Any]]:
-
+def collect_facebook_leads() -> List[Dict[str, Any]]:
     if not FACEBOOK_ACCESS_TOKEN:
         print(
-            "Facebook: API token not configured. Skipping."
+            "FACEBOOK_ACCESS_TOKEN not configured. "
+            "Skipping Facebook."
         )
         return []
 
     if not FACEBOOK_PAGE_ID:
         print(
-            "Facebook: Page ID not configured. Skipping."
+            "FACEBOOK_PAGE_ID not configured. "
+            "Skipping Facebook."
         )
         return []
 
-    print(
-        "Facebook: authorized API detected."
-    )
+    print("Checking authorized Facebook Page...")
 
-    try:
-
-        response = requests.get(
-            f"https://graph.facebook.com/v23.0/"
-            f"{FACEBOOK_PAGE_ID}",
-            params={
-                "fields":
-                    "id,name,link,website,about,location",
-                "access_token":
-                    FACEBOOK_ACCESS_TOKEN,
-            },
-            timeout=REQUEST_TIMEOUT
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        name = clean(
-            data.get("name", "")
-        )
-
-        if not name:
-            return []
-
-        location = data.get(
-            "location",
-            {}
-        )
-
-        city = clean(
-            location.get("city", "")
-        )
-
-        about = clean(
-            data.get("about", "")
-        )
-
-        profile = normalize_url(
-            data.get("link", "")
-        )
-
-        website = normalize_url(
-            data.get("website", "")
-        )
-
-        email = extract_email(
-            about
-        )
-
-        return [{
-            "name": name,
-            "platform": "Facebook",
-            "profile_url": profile,
-            "channel_url": "",
-            "creator_or_business": "Business",
-            "niche": detect_niche(about),
-            "country": "",
-            "city": city,
-            "subscribers": "",
-            "avg_views": "",
-            "business_email": email,
-            "instagram": "",
-            "linkedin": "",
-            "twitter_x": "",
-            "website": website,
-            "recent_upload": "",
-            "contact_type": (
-                "Business email"
-                if email
-                else "Public profile"
-            ),
-            "lead_source": "Facebook Graph API",
-            "status": "New",
-            "notes": "Authorized Facebook Page data.",
-        }]
-
-    except requests.RequestException as error:
-
-        print(
-            f"Facebook API error: {error}"
-        )
-
-        return []
-
-
-# ============================================================
-# X / TWITTER
-# ============================================================
-
-def collect_x() -> List[Dict[str, Any]]:
-
-    if not X_BEARER_TOKEN:
-        print(
-            "X: bearer token not configured. Skipping."
-        )
-        return []
-
-    print(
-        "X: authorized API detected."
-    )
-
-    headers = {
-        "Authorization":
-            f"Bearer {X_BEARER_TOKEN}"
+    params = {
+        "fields": (
+            "id,name,about,website,"
+            "link,location"
+        ),
+        "access_token": FACEBOOK_ACCESS_TOKEN,
     }
 
-    try:
+    data = request_json(
+        f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}",
+        params=params,
+    )
 
-        response = requests.get(
-            "https://api.x.com/2/users/me",
-            headers=headers,
-            params={
-                "user.fields":
-                    "name,username,description,"
-                    "location,public_metrics,url",
-            },
-            timeout=REQUEST_TIMEOUT
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        user = data.get(
-            "data",
-            {}
-        )
-
-        u
+    if not data:
+        print("Facebook Page could no
