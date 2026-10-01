@@ -12,19 +12,19 @@ import requests
 # =========================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_FILE = PROJECT_ROOT / "data" / "leads.csv"
+DATA_DIR = PROJECT_ROOT / "data"
+DATA_FILE = DATA_DIR / "leads.csv"
 
 MIN_SUBSCRIBERS = 10_000
 MAX_SUBSCRIBERS = 50_000
+
+REQUEST_TIMEOUT = 30
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv(
     "GOOGLE_SERVICE_ACCOUNT_JSON", ""
 ).strip()
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
-
-REQUEST_TIMEOUT = 30
-
 
 CSV_HEADERS = [
     "name",
@@ -51,7 +51,7 @@ CSV_HEADERS = [
 
 
 # =========================================================
-# HELPERS
+# BASIC HELPERS
 # =========================================================
 
 def clean(value):
@@ -98,60 +98,103 @@ def detect_niche(text):
 
     niches = {
         "Gaming": [
-            "gaming", "gamer", "gameplay",
-            "bgmi", "pubg", "minecraft",
-            "free fire", "valorant"
+            "gaming",
+            "gamer",
+            "gameplay",
+            "bgmi",
+            "pubg",
+            "minecraft",
+            "free fire",
+            "valorant",
         ],
         "Tech": [
-            "technology", "tech", "android",
-            "iphone", "software", "smartphone"
+            "technology",
+            "tech",
+            "android",
+            "iphone",
+            "software",
+            "smartphone",
         ],
         "Gadgets": [
-            "gadget", "gadgets", "unboxing",
-            "review", "earbuds", "smartwatch"
+            "gadget",
+            "gadgets",
+            "unboxing",
+            "review",
+            "earbuds",
+            "smartwatch",
         ],
         "PC/Computer": [
-            "pc", "computer", "laptop",
-            "hardware", "processor", "gpu"
+            "pc",
+            "computer",
+            "laptop",
+            "hardware",
+            "processor",
+            "gpu",
         ],
         "Mobile": [
-            "mobile", "phone", "smartphone"
+            "mobile",
+            "phone",
+            "smartphone",
         ],
         "Lifestyle": [
-            "lifestyle", "daily life", "routine"
+            "lifestyle",
+            "daily life",
+            "routine",
         ],
         "Education": [
-            "education", "educational",
-            "study", "learning"
+            "education",
+            "educational",
+            "study",
+            "learning",
         ],
         "Entertainment": [
-            "entertainment", "movies",
-            "film", "films", "celebrity"
+            "entertainment",
+            "movies",
+            "film",
+            "films",
+            "celebrity",
         ],
         "Fitness": [
-            "fitness", "gym",
-            "workout", "bodybuilding"
+            "fitness",
+            "gym",
+            "workout",
+            "bodybuilding",
         ],
         "Fashion": [
-            "fashion", "style", "makeup"
+            "fashion",
+            "style",
+            "makeup",
         ],
         "Travel": [
-            "travel", "travelling",
-            "tour", "trip"
+            "travel",
+            "travelling",
+            "tour",
+            "trip",
         ],
         "Finance": [
-            "finance", "stock",
-            "investing", "investment", "trading"
+            "finance",
+            "stock",
+            "investing",
+            "investment",
+            "trading",
         ],
         "Automotive": [
-            "automotive", "car", "cars",
-            "bike", "bikes", "automobile"
+            "automotive",
+            "car",
+            "cars",
+            "bike",
+            "bikes",
+            "automobile",
         ],
         "Comedy": [
-            "comedy", "funny", "standup"
+            "comedy",
+            "funny",
+            "standup",
         ],
         "Vlogging": [
-            "vlog", "vlogging", "vlogger"
+            "vlog",
+            "vlogging",
+            "vlogger",
         ],
     }
 
@@ -168,18 +211,18 @@ def detect_niche(text):
 # =========================================================
 
 def ensure_csv():
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DATA_FILE.exists():
         with open(
             DATA_FILE,
             "w",
             newline="",
-            encoding="utf-8"
+            encoding="utf-8",
         ) as file:
             writer = csv.DictWriter(
                 file,
-                fieldnames=CSV_HEADERS
+                fieldnames=CSV_HEADERS,
             )
             writer.writeheader()
 
@@ -191,7 +234,7 @@ def read_csv():
         DATA_FILE,
         "r",
         newline="",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
         return list(csv.DictReader(file))
 
@@ -239,7 +282,7 @@ def normalize_lead(lead):
         "instagram",
         "linkedin",
         "twitter_x",
-        "website"
+        "website",
     ]:
         result[field] = normalize_url(
             result[field]
@@ -255,12 +298,11 @@ def save_leads(leads):
         DATA_FILE,
         "w",
         newline="",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         writer = csv.DictWriter(
             file,
-            fieldnames=CSV_HEADERS
+            fieldnames=CSV_HEADERS,
         )
 
         writer.writeheader()
@@ -284,20 +326,22 @@ def get_json(url, params):
         response = requests.get(
             url,
             params=params,
-            timeout=REQUEST_TIMEOUT
+            timeout=REQUEST_TIMEOUT,
         )
 
         if response.status_code != 200:
             print(
-                f"HTTP ERROR {response.status_code}: "
-                f"{response.text[:500]}"
+                f"HTTP ERROR {response.status_code}"
             )
+            print(response.text[:1000])
             return {}
 
         return response.json()
 
     except Exception as error:
-        print(f"REQUEST ERROR: {error}")
+        print(
+            f"REQUEST ERROR: {type(error).__name__}: {error}"
+        )
         return {}
 
 
@@ -329,7 +373,10 @@ def youtube_search(query):
         print("ERROR: YOUTUBE_API_KEY is missing.")
         return []
 
-    url = "https://www.googleapis.com/youtube/v3/search"
+    url = (
+        "https://www.googleapis.com/"
+        "youtube/v3/search"
+    )
 
     params = {
         "part": "snippet",
@@ -344,8 +391,13 @@ def youtube_search(query):
 
     if "error" in data:
         print(
-            "YOUTUBE API ERROR:",
-            json.dumps(data["error"], indent=2)
+            "YOUTUBE API ERROR:"
+        )
+        print(
+            json.dumps(
+                data["error"],
+                indent=2,
+            )
         )
         return []
 
@@ -356,7 +408,10 @@ def youtube_get_channels(channel_ids):
     if not channel_ids:
         return []
 
-    url = "https://www.googleapis.com/youtube/v3/channels"
+    url = (
+        "https://www.googleapis.com/"
+        "youtube/v3/channels"
+    )
 
     params = {
         "part": "snippet,statistics,contentDetails",
@@ -369,8 +424,13 @@ def youtube_get_channels(channel_ids):
 
     if "error" in data:
         print(
-            "YOUTUBE CHANNEL API ERROR:",
-            json.dumps(data["error"], indent=2)
+            "YOUTUBE CHANNEL API ERROR:"
+        )
+        print(
+            json.dumps(
+                data["error"],
+                indent=2,
+            )
         )
         return []
 
@@ -415,7 +475,9 @@ def youtube_latest_upload(channel):
         )
 
     except Exception as error:
-        print(f"LATEST UPLOAD ERROR: {error}")
+        print(
+            f"LATEST UPLOAD ERROR: {error}"
+        )
         return ""
 
 
@@ -425,14 +487,16 @@ def collect_youtube():
     print("=" * 60)
 
     if not YOUTUBE_API_KEY:
-        print("ERROR: YOUTUBE_API_KEY is missing.")
+        print(
+            "ERROR: YOUTUBE_API_KEY is missing."
+        )
         return []
 
     found_channels = {}
 
     for query in YOUTUBE_SEARCH_QUERIES:
 
-        print(f"Searching: {query}")
+        print(f"Searching YouTube: {query}")
 
         items = youtube_search(query)
 
@@ -459,16 +523,26 @@ def collect_youtube():
     )
 
     if not found_channels:
-        print("WARNING: No YouTube channels found.")
+        print(
+            "WARNING: No YouTube channels found."
+        )
         return []
 
-    channel_ids = list(found_channels.keys())
+    channel_ids = list(
+        found_channels.keys()
+    )
 
     channels = []
 
-    for start in range(0, len(channel_ids), 50):
+    for start in range(
+        0,
+        len(channel_ids),
+        50,
+    ):
 
-        batch = channel_ids[start:start + 50]
+        batch = channel_ids[
+            start:start + 50
+        ]
 
         channels.extend(
             youtube_get_channels(batch)
@@ -483,21 +557,34 @@ def collect_youtube():
 
     for channel in channels:
 
-        snippet = channel.get("snippet", {})
-        statistics = channel.get("statistics", {})
+        snippet = channel.get(
+            "snippet",
+            {},
+        )
+
+        statistics = channel.get(
+            "statistics",
+            {},
+        )
 
         title = clean(
-            snippet.get("title", "")
+            snippet.get(
+                "title",
+                "",
+            )
         )
 
         description = clean(
-            snippet.get("description", "")
+            snippet.get(
+                "description",
+                "",
+            )
         )
 
         subscribers = safe_int(
             statistics.get(
                 "subscriberCount",
-                0
+                0,
             )
         )
 
@@ -509,18 +596,26 @@ def collect_youtube():
             continue
 
         niche = detect_niche(
-            title + " " + description
+            title
+            + " "
+            + description
         )
 
         if not niche:
             continue
 
         channel_id = clean(
-            channel.get("id", "")
+            channel.get(
+                "id",
+                "",
+            )
         )
 
         custom_url = clean(
-            snippet.get("customUrl", "")
+            snippet.get(
+                "customUrl",
+                "",
+            )
         )
 
         if custom_url:
@@ -539,10 +634,14 @@ def collect_youtube():
             + channel_id
         )
 
-        email = extract_email(description)
+        email = extract_email(
+            description
+        )
 
-        latest_upload = youtube_latest_upload(
-            channel
+        latest_upload = (
+            youtube_latest_upload(
+                channel
+            )
         )
 
         lead = {
@@ -567,7 +666,9 @@ def collect_youtube():
                 if email
                 else "Public Profile"
             ),
-            "lead_source": "YouTube Data API",
+            "lead_source": (
+                "YouTube Data API"
+            ),
             "status": "New",
             "notes": (
                 "Public YouTube channel. "
@@ -578,7 +679,7 @@ def collect_youtube():
         leads.append(lead)
 
     print(
-        f"YOUTUBE LEADS AFTER FILTERING: "
+        "YOUTUBE LEADS AFTER FILTERING: "
         f"{len(leads)}"
     )
 
@@ -595,47 +696,124 @@ def upload_to_google_sheets(leads):
     print("STARTING GOOGLE SHEETS UPLOAD")
     print("=" * 60)
 
+    # -----------------------------------------------------
+    # Check Secret 1
+    # -----------------------------------------------------
+
     if not GOOGLE_SERVICE_ACCOUNT_JSON:
+
         print(
             "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
-            "SECRET IS EMPTY OR MISSING."
+            "IS EMPTY OR MISSING."
         )
+
         return False
+
+    # -----------------------------------------------------
+    # Check Secret 2
+    # -----------------------------------------------------
 
     if not GOOGLE_SHEET_ID:
+
         print(
             "ERROR: GOOGLE_SHEET_ID "
-            "SECRET IS EMPTY OR MISSING."
+            "IS EMPTY OR MISSING."
         )
+
         return False
 
+    # -----------------------------------------------------
+    # Check Leads
+    # -----------------------------------------------------
+
     if not leads:
+
         print(
-            "WARNING: No leads available "
+            "WARNING: No new leads available "
             "for Google Sheets."
         )
-        return False
+
+        return True
 
     try:
 
-        print("Loading Google Sheets libraries...")
+        print(
+            "Loading Google Sheets libraries..."
+        )
 
         import gspread
-        from google.oauth2.service_account import Credentials
 
-        print("Google Sheets libraries loaded.")
+        from google.oauth2.service_account import (
+            Credentials
+        )
+
+        print(
+            "Google Sheets libraries loaded."
+        )
+
+        # -------------------------------------------------
+        # Parse Service Account JSON
+        # -------------------------------------------------
 
         try:
+
             service_account_info = json.loads(
                 GOOGLE_SERVICE_ACCOUNT_JSON
             )
+
         except json.JSONDecodeError as error:
+
             print(
                 "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
-                "IS INVALID JSON."
+                "IS NOT VALID JSON."
             )
-            print(repr(error))
+
+            print(
+                f"JSON ERROR: {error}"
+            )
+
             return False
+
+        # -------------------------------------------------
+        # Show SAFE account information
+        # -------------------------------------------------
+
+        service_account_email = clean(
+            service_account_info.get(
+                "client_email",
+                "",
+            )
+        )
+
+        project_id = clean(
+            service_account_info.get(
+                "project_id",
+                "",
+            )
+        )
+
+        if not service_account_email:
+
+            print(
+                "ERROR: client_email missing "
+                "inside service account JSON."
+            )
+
+            return False
+
+        print(
+            "Service Account:"
+            f" {service_account_email}"
+        )
+
+        print(
+            "Google Cloud Project:"
+            f" {project_id}"
+        )
+
+        # -------------------------------------------------
+        # Google API Scopes
+        # -------------------------------------------------
 
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -645,49 +823,122 @@ def upload_to_google_sheets(leads):
         credentials = (
             Credentials.from_service_account_info(
                 service_account_info,
-                scopes=scopes
+                scopes=scopes,
             )
         )
 
-        print("Credentials created successfully.")
+        print(
+            "Credentials created successfully."
+        )
 
-        client = gspread.authorize(credentials)
+        # -------------------------------------------------
+        # Authorize using the SAME service account
+        # from GOOGLE_SERVICE_ACCOUNT_JSON secret
+        # -------------------------------------------------
 
-        print("Google account authorization successful.")
+        client = gspread.authorize(
+            credentials
+        )
+
+        print(
+            "Google account authorization "
+            "successful."
+        )
+
+        # -------------------------------------------------
+        # Open EXACT Sheet from GOOGLE_SHEET_ID
+        # -------------------------------------------------
+
+        print(
+            "Opening Google Sheet using "
+            "GOOGLE_SHEET_ID..."
+        )
 
         spreadsheet = client.open_by_key(
             GOOGLE_SHEET_ID
         )
 
         print(
-            f"Google Sheet opened successfully: "
-            f"{spreadsheet.title}"
+            "Google Sheet opened successfully:"
+            f" {spreadsheet.title}"
         )
+
+        # -------------------------------------------------
+        # Use first worksheet
+        # -------------------------------------------------
 
         worksheet = spreadsheet.sheet1
 
         print(
-            f"Using worksheet: {worksheet.title}"
+            "Using worksheet:"
+            f" {worksheet.title}"
         )
 
-        # Make sure header exists
-        worksheet.update(
-            "A1:T1",
-            [CSV_HEADERS]
+        # -------------------------------------------------
+        # Header
+        # -------------------------------------------------
+
+        existing_values = (
+            worksheet.get_all_values()
         )
 
-        print("Sheet header checked/updated.")
+        if not existing_values:
 
-        existing_values = worksheet.get_all_values()
+            worksheet.append_row(
+                CSV_HEADERS,
+                value_input_option="RAW",
+            )
+
+            existing_values = [
+                CSV_HEADERS
+            ]
+
+            print(
+                "Google Sheet was empty."
+            )
+
+            print(
+                "Header row created."
+            )
+
+        else:
+
+            existing_header = (
+                existing_values[0]
+                if existing_values
+                else []
+            )
+
+            if existing_header != CSV_HEADERS:
+
+                worksheet.update(
+                    "A1:T1",
+                    [CSV_HEADERS],
+                )
+
+                print(
+                    "Google Sheet header "
+                    "updated."
+                )
+
+        # -------------------------------------------------
+        # Existing rows / duplicate protection
+        # -------------------------------------------------
+
+        existing_values = (
+            worksheet.get_all_values()
+        )
 
         print(
-            f"Existing Google Sheet rows: "
-            f"{len(existing_values)}"
+            "Existing Google Sheet rows:"
+            f" {len(existing_values)}"
         )
 
         existing_keys = set()
 
-        for row_values in existing_values[1:]:
+        for row_values in (
+            existing_values[1:]
+        ):
 
             row = {}
 
@@ -703,159 +954,3 @@ def upload_to_google_sheets(leads):
 
             existing_keys.add(
                 lead_key(row)
-            )
-
-        rows_to_add = []
-
-        for lead in leads:
-
-            normalized = normalize_lead(lead)
-
-            key = lead_key(normalized)
-
-            if key in existing_keys:
-                continue
-
-            rows_to_add.append(
-                [
-                    normalized[header]
-                    for header in CSV_HEADERS
-                ]
-            )
-
-            existing_keys.add(key)
-
-        print(
-            f"New rows ready for upload: "
-            f"{len(rows_to_add)}"
-        )
-
-        if not rows_to_add:
-            print(
-                "Google Sheet already contains "
-                "all collected leads."
-            )
-            return True
-
-        worksheet.append_rows(
-            rows_to_add,
-            value_input_option="USER_ENTERED"
-        )
-
-        print(
-            f"SUCCESS: {len(rows_to_add)} "
-            f"NEW LEADS UPLOADED TO GOOGLE SHEETS."
-        )
-
-        # Verify upload
-        updated_values = worksheet.get_all_values()
-
-        print(
-            f"Google Sheet rows after upload: "
-            f"{len(updated_values)}"
-        )
-
-        print(
-            "GOOGLE SHEETS UPLOAD VERIFIED."
-        )
-
-        return True
-
-    except Exception as error:
-
-        print("=" * 60)
-        print("GOOGLE SHEETS UPLOAD FAILED")
-        print("=" * 60)
-
-        print(
-            "ERROR TYPE:",
-            type(error).__name__
-        )
-
-        print(
-            "ERROR:",
-            repr(error)
-        )
-
-        print(
-            "IMPORTANT: Check that the Google "
-            "service account has Editor access "
-            "to the Google Sheet."
-        )
-
-        return False
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    print("=" * 60)
-    print("LEAD AUTOMATION STARTED")
-    print("=" * 60)
-
-    ensure_csv()
-
-    youtube_leads = collect_youtube()
-
-    print(
-        f"Total YouTube leads collected: "
-        f"{len(youtube_leads)}"
-    )
-
-    existing_leads = read_csv()
-
-    existing_keys = {
-        lead_key(lead)
-        for lead in existing_leads
-    }
-
-    final_leads = list(existing_leads)
-
-    new_count = 0
-
-    for lead in youtube_leads:
-
-        normalized = normalize_lead(lead)
-
-        key = lead_key(normalized)
-
-        if key not in existing_keys:
-
-            final_leads.append(normalized)
-
-            existing_keys.add(key)
-
-            new_count += 1
-
-    print(
-        f"New leads added to CSV: "
-        f"{new_count}"
-    )
-
-    save_leads(final_leads)
-
-    sheets_success = upload_to_google_sheets(
-        youtube_leads
-    )
-
-    if sheets_success:
-        print(
-            "FINAL STATUS: "
-            "GOOGLE SHEETS SUCCESS"
-        )
-    else:
-        print(
-            "FINAL STATUS: "
-            "GOOGLE SHEETS FAILED"
-        )
-
-    print("=" * 60)
-    print("LEAD AUTOMATION FINISHED")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    main()
