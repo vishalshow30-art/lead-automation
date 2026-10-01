@@ -1,9 +1,12 @@
 from pathlib import Path
+
+code = r'''from pathlib import Path
 import csv
 import json
 import os
 import re
 import time
+
 import requests
 
 
@@ -87,7 +90,7 @@ def extract_email(text):
 
     match = re.search(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-        text
+        text,
     )
 
     return match.group(0) if match else ""
@@ -390,9 +393,7 @@ def youtube_search(query):
     data = get_json(url, params)
 
     if "error" in data:
-        print(
-            "YOUTUBE API ERROR:"
-        )
+        print("YOUTUBE API ERROR:")
         print(
             json.dumps(
                 data["error"],
@@ -423,9 +424,7 @@ def youtube_get_channels(channel_ids):
     data = get_json(url, params)
 
     if "error" in data:
-        print(
-            "YOUTUBE CHANNEL API ERROR:"
-        )
+        print("YOUTUBE CHANNEL API ERROR:")
         print(
             json.dumps(
                 data["error"],
@@ -462,7 +461,6 @@ def youtube_latest_upload(channel):
         }
 
         data = get_json(url, params)
-
         items = data.get("items", [])
 
         if not items:
@@ -487,15 +485,12 @@ def collect_youtube():
     print("=" * 60)
 
     if not YOUTUBE_API_KEY:
-        print(
-            "ERROR: YOUTUBE_API_KEY is missing."
-        )
+        print("ERROR: YOUTUBE_API_KEY is missing.")
         return []
 
     found_channels = {}
 
     for query in YOUTUBE_SEARCH_QUERIES:
-
         print(f"Searching YouTube: {query}")
 
         items = youtube_search(query)
@@ -505,7 +500,6 @@ def collect_youtube():
         )
 
         for item in items:
-
             channel_id = (
                 item
                 .get("snippet", {})
@@ -523,9 +517,7 @@ def collect_youtube():
     )
 
     if not found_channels:
-        print(
-            "WARNING: No YouTube channels found."
-        )
+        print("WARNING: No YouTube channels found.")
         return []
 
     channel_ids = list(
@@ -539,7 +531,6 @@ def collect_youtube():
         len(channel_ids),
         50,
     ):
-
         batch = channel_ids[
             start:start + 50
         ]
@@ -556,7 +547,6 @@ def collect_youtube():
     leads = []
 
     for channel in channels:
-
         snippet = channel.get(
             "snippet",
             {},
@@ -610,6 +600,9 @@ def collect_youtube():
                 "",
             )
         )
+
+        if not channel_id:
+            continue
 
         custom_url = clean(
             snippet.get(
@@ -666,9 +659,7 @@ def collect_youtube():
                 if email
                 else "Public Profile"
             ),
-            "lead_source": (
-                "YouTube Data API"
-            ),
+            "lead_source": "YouTube Data API",
             "status": "New",
             "notes": (
                 "Public YouTube channel. "
@@ -691,58 +682,37 @@ def collect_youtube():
 # =========================================================
 
 def upload_to_google_sheets(leads):
-
     print("=" * 60)
     print("STARTING GOOGLE SHEETS UPLOAD")
     print("=" * 60)
 
-    # -----------------------------------------------------
-    # Check Secret 1
-    # -----------------------------------------------------
-
     if not GOOGLE_SERVICE_ACCOUNT_JSON:
-
         print(
             "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
             "IS EMPTY OR MISSING."
         )
-
         return False
 
-    # -----------------------------------------------------
-    # Check Secret 2
-    # -----------------------------------------------------
-
     if not GOOGLE_SHEET_ID:
-
         print(
             "ERROR: GOOGLE_SHEET_ID "
             "IS EMPTY OR MISSING."
         )
-
         return False
 
-    # -----------------------------------------------------
-    # Check Leads
-    # -----------------------------------------------------
-
     if not leads:
-
         print(
             "WARNING: No new leads available "
             "for Google Sheets."
         )
-
         return True
 
     try:
-
         print(
             "Loading Google Sheets libraries..."
         )
 
         import gspread
-
         from google.oauth2.service_account import (
             Credentials
         )
@@ -756,22 +726,27 @@ def upload_to_google_sheets(leads):
         # -------------------------------------------------
 
         try:
-
             service_account_info = json.loads(
                 GOOGLE_SERVICE_ACCOUNT_JSON
             )
-
         except json.JSONDecodeError as error:
-
             print(
                 "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
                 "IS NOT VALID JSON."
             )
-
             print(
                 f"JSON ERROR: {error}"
             )
+            return False
 
+        if not isinstance(
+            service_account_info,
+            dict,
+        ):
+            print(
+                "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
+                "must contain a JSON object."
+            )
             return False
 
         # -------------------------------------------------
@@ -793,12 +768,10 @@ def upload_to_google_sheets(leads):
         )
 
         if not service_account_email:
-
             print(
                 "ERROR: client_email missing "
                 "inside service account JSON."
             )
-
             return False
 
         print(
@@ -883,7 +856,6 @@ def upload_to_google_sheets(leads):
         )
 
         if not existing_values:
-
             worksheet.append_row(
                 CSV_HEADERS,
                 value_input_option="RAW",
@@ -902,7 +874,6 @@ def upload_to_google_sheets(leads):
             )
 
         else:
-
             existing_header = (
                 existing_values[0]
                 if existing_values
@@ -910,7 +881,6 @@ def upload_to_google_sheets(leads):
             )
 
             if existing_header != CSV_HEADERS:
-
                 worksheet.update(
                     "A1:T1",
                     [CSV_HEADERS],
@@ -939,13 +909,11 @@ def upload_to_google_sheets(leads):
         for row_values in (
             existing_values[1:]
         ):
-
             row = {}
 
             for index, header in enumerate(
                 CSV_HEADERS
             ):
-
                 row[header] = (
                     row_values[index]
                     if index < len(row_values)
@@ -954,3 +922,229 @@ def upload_to_google_sheets(leads):
 
             existing_keys.add(
                 lead_key(row)
+            )
+
+        # -------------------------------------------------
+        # Prepare only NEW rows
+        # -------------------------------------------------
+
+        rows_to_add = []
+
+        for lead in leads:
+            normalized = normalize_lead(
+                lead
+            )
+
+            key = lead_key(normalized)
+
+            if key in existing_keys:
+                continue
+
+            rows_to_add.append(
+                [
+                    normalized[header]
+                    for header in CSV_HEADERS
+                ]
+            )
+
+            existing_keys.add(key)
+
+        print(
+            "New rows ready for upload:"
+            f" {len(rows_to_add)}"
+        )
+
+        if not rows_to_add:
+            print(
+                "No new rows to upload."
+            )
+            print(
+                "Google Sheet already contains "
+                "all these leads."
+            )
+            return True
+
+        # -------------------------------------------------
+        # Upload
+        # -------------------------------------------------
+
+        print(
+            "Uploading rows to Google Sheets..."
+        )
+
+        worksheet.append_rows(
+            rows_to_add,
+            value_input_option="USER_ENTERED",
+        )
+
+        print(
+            "SUCCESS:"
+            f" {len(rows_to_add)} NEW LEADS "
+            "UPLOADED TO GOOGLE SHEETS."
+        )
+
+        # -------------------------------------------------
+        # Verify upload
+        # -------------------------------------------------
+
+        print(
+            "Verifying Google Sheets upload..."
+        )
+
+        updated_values = (
+            worksheet.get_all_values()
+        )
+
+        print(
+            "Google Sheet rows after upload:"
+            f" {len(updated_values)}"
+        )
+
+        expected_min_rows = (
+            len(existing_values)
+            + len(rows_to_add)
+        )
+
+        if len(updated_values) >= expected_min_rows:
+            print(
+                "GOOGLE SHEETS UPLOAD VERIFIED."
+            )
+            return True
+
+        print(
+            "WARNING: Upload request completed, "
+            "but row count verification did "
+            "not match."
+        )
+        return False
+
+    except Exception as error:
+        print("=" * 60)
+        print("GOOGLE SHEETS UPLOAD FAILED")
+        print("=" * 60)
+        print(
+            f"ERROR TYPE: {type(error).__name__}"
+        )
+        print(
+            f"ERROR: {error}"
+        )
+        print()
+        print(
+            "CHECKLIST:"
+        )
+        print(
+            "1. GOOGLE_SERVICE_ACCOUNT_JSON "
+            "contains the complete JSON."
+        )
+        print(
+            "2. GOOGLE_SHEET_ID is correct."
+        )
+        print(
+            "3. The service-account email "
+            "has Editor access to the Sheet."
+        )
+        print(
+            "4. Google Sheets API and Google "
+            "Drive API are enabled."
+        )
+        return False
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+    print("=" * 60)
+    print("LEAD AUTOMATION STARTED")
+    print("=" * 60)
+
+    print(
+        "Google Sheet ID configured:"
+        f" {'YES' if GOOGLE_SHEET_ID else 'NO'}"
+    )
+
+    print(
+        "Google Service Account configured:"
+        f" {'YES' if GOOGLE_SERVICE_ACCOUNT_JSON else 'NO'}"
+    )
+
+    print(
+        "YouTube API configured:"
+        f" {'YES' if YOUTUBE_API_KEY else 'NO'}"
+    )
+
+    ensure_csv()
+
+    youtube_leads = collect_youtube()
+
+    print(
+        "Total YouTube leads collected:"
+        f" {len(youtube_leads)}"
+    )
+
+    # -----------------------------------------------------
+    # Save only new leads to local CSV
+    # -----------------------------------------------------
+
+    existing_leads = read_csv()
+
+    existing_keys = {
+        lead_key(lead)
+        for lead in existing_leads
+    }
+
+    final_leads = list(existing_leads)
+    new_count = 0
+
+    for lead in youtube_leads:
+        normalized = normalize_lead(lead)
+        key = lead_key(normalized)
+
+        if key not in existing_keys:
+            final_leads.append(normalized)
+            existing_keys.add(key)
+            new_count += 1
+
+    print(
+        "New leads added to CSV:"
+        f" {new_count}"
+    )
+
+    save_leads(final_leads)
+
+    # -----------------------------------------------------
+    # Google Sheets
+    # -----------------------------------------------------
+
+    sheets_success = upload_to_google_sheets(
+        youtube_leads
+    )
+
+    if sheets_success:
+        print(
+            "FINAL STATUS: GOOGLE SHEETS SUCCESS"
+        )
+    else:
+        print(
+            "FINAL STATUS: GOOGLE SHEETS FAILED"
+        )
+
+    print("=" * 60)
+    print("LEAD AUTOMATION FINISHED")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+output_path = "/mnt/data/lead_collector_updated.py"
+Path(output_path).write_text(code, encoding="utf-8")
+
+# Final syntax check before giving the file to the user.
+compile(code, output_path, "exec")
+
+print(f"Updated file created: {output_path}")
+print(f"Lines: {len(code.splitlines())}")
+print("Syntax check: PASSED")
