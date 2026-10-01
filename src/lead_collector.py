@@ -118,9 +118,11 @@ def load_existing_leads() -> List[Dict[str, str]]:
             newline="",
             encoding="utf-8",
         ) as file:
+
             reader = csv.DictReader(file)
 
             for row in reader:
+
                 lead = {}
 
                 for header in CSV_HEADERS:
@@ -131,6 +133,7 @@ def load_existing_leads() -> List[Dict[str, str]]:
                 leads.append(lead)
 
     except Exception as exc:
+
         print(
             f"Could not read CSV: {exc}"
         )
@@ -161,6 +164,7 @@ def save_leads(
         writer.writeheader()
 
         for lead in leads:
+
             row = {}
 
             for header in CSV_HEADERS:
@@ -183,16 +187,20 @@ def save_leads(
 def get_google_sheets_service():
 
     if build is None:
+
         print(
             "ERROR: google-api-python-client "
             "is not installed."
         )
+
         return None
 
     if Credentials is None:
+
         print(
             "ERROR: google-auth is not installed."
         )
+
         return None
 
     service_account_json = os.getenv(
@@ -200,13 +208,16 @@ def get_google_sheets_service():
     )
 
     if not service_account_json:
+
         print(
-            "WARNING: GOOGLE_SERVICE_ACCOUNT_JSON "
+            "ERROR: GOOGLE_SERVICE_ACCOUNT_JSON "
             "is missing."
         )
+
         return None
 
     try:
+
         credentials_info = json.loads(
             service_account_json
         )
@@ -233,9 +244,11 @@ def get_google_sheets_service():
         return service
 
     except Exception as exc:
+
         print(
             f"Google Sheets connection failed: {exc}"
         )
+
         return None
 
 
@@ -248,9 +261,11 @@ def save_leads_to_google_sheet(
 ) -> None:
 
     if not leads:
+
         print(
             "Google Sheet: no new leads to upload."
         )
+
         return
 
     spreadsheet_id = os.getenv(
@@ -258,9 +273,11 @@ def save_leads_to_google_sheet(
     )
 
     if not spreadsheet_id:
+
         print(
-            "WARNING: GOOGLE_SHEET_ID is missing."
+            "ERROR: GOOGLE_SHEET_ID is missing."
         )
+
         return
 
     sheets = get_google_sheets_service()
@@ -284,9 +301,11 @@ def save_leads_to_google_sheet(
         )
 
         if not sheet_list:
+
             print(
                 "ERROR: No sheet tab found."
             )
+
             return
 
         sheet_title = (
@@ -299,6 +318,33 @@ def save_leads_to_google_sheet(
             f"Google Sheet tab: {sheet_title}"
         )
 
+        # ----------------------------------------------------
+        # Make sure header row exists
+        # ----------------------------------------------------
+
+        header_range = (
+            f"'{sheet_title}'!A1:K1"
+        )
+
+        sheets.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=header_range,
+            valueInputOption="RAW",
+            body={
+                "values": [
+                    CSV_HEADERS
+                ]
+            },
+        ).execute()
+
+        print(
+            "Google Sheet header checked."
+        )
+
+        # ----------------------------------------------------
+        # Prepare lead rows
+        # ----------------------------------------------------
+
         values = []
 
         for lead in leads:
@@ -306,6 +352,7 @@ def save_leads_to_google_sheet(
             row = []
 
             for header in CSV_HEADERS:
+
                 row.append(
                     lead.get(
                         header,
@@ -314,6 +361,10 @@ def save_leads_to_google_sheet(
                 )
 
             values.append(row)
+
+        # ----------------------------------------------------
+        # Upload leads
+        # ----------------------------------------------------
 
         range_name = (
             f"'{sheet_title}'!A:K"
@@ -350,6 +401,7 @@ def save_leads_to_google_sheet(
         )
 
         if updated_range:
+
             print(
                 f"Updated range: {updated_range}"
             )
@@ -616,15 +668,19 @@ def get_youtube_service():
     )
 
     if not api_key:
+
         print(
             "ERROR: YOUTUBE_API_KEY is missing."
         )
+
         return None
 
     if build is None:
+
         print(
             "ERROR: Google API library missing."
         )
+
         return None
 
     try:
@@ -821,6 +877,7 @@ def get_youtube_channel_details(
                 "hiddenSubscriberCount",
                 False,
             ):
+
                 subscribers = ""
 
             country = clean_text(
@@ -943,6 +1000,7 @@ def collect_youtube_leads(
         channel_ids = []
 
         for channel in channels:
+
             channel_ids.append(
                 channel["channel_id"]
             )
@@ -975,68 +1033,4 @@ def collect_youtube_leads(
 
             new_leads.append(
                 lead
-            )
-
-        time.sleep(1)
-
-    print(
-        "New YouTube leads found: "
-        + str(len(new_leads))
-    )
-
-    return new_leads
-
-
-# ============================================================
-# OTHER SOURCES
-# ============================================================
-
-def collect_instagram_leads():
-
-    print(
-        "Instagram: authorized API "
-        "not configured."
-    )
-
-    return []
-
-
-def collect_facebook_leads():
-
-    print(
-        "Facebook: authorized API "
-        "not configured."
-    )
-
-    return []
-
-
-def collect_x_leads():
-
-    print(
-        "X/Twitter: authorized API "
-        "not configured."
-    )
-
-    return []
-
-
-def collect_linkedin_leads():
-
-    print(
-        "LinkedIn: authorized API "
-        "not configured."
-    )
-
-    return []
-
-
-def collect_website_leads():
-
-    print(
-        "Websites: authorized search "
-        "source not configured."
-    )
-
-    return []
-
+  
