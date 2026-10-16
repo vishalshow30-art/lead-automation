@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
 import requests
+from requests.auth import HTTPBasicAuth
 
 # ============================================================
 # CONFIG — PRESERVE EXISTING SETTINGS
@@ -24,7 +25,10 @@ ACTIVE_DAYS = int(os.getenv("ACTIVE_DAYS", "60"))
 REQUEST_TIMEOUT = 30
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+
 X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "").strip()
+X_API_KEY = os.getenv("X_API_KEY", "").strip()
+X_API_SECRET = os.getenv("X_API_SECRET", "").strip()
 
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv(
     "GOOGLE_SERVICE_ACCOUNT_JSON", ""
@@ -33,55 +37,27 @@ GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
 GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME", "").strip()
 
 CSV_HEADERS = [
-    "name",
-    "platform",
-    "profile_url",
-    "channel_url",
-    "creator_or_business",
-    "niche",
-    "country",
-    "city",
-    "subscribers",
-    "avg_views",
-    "business_email",
-    "instagram",
-    "linkedin",
-    "twitter_x",
-    "website",
-    "recent_upload",
-    "contact_type",
-    "lead_source",
-    "status",
-    "notes",
+    "name", "platform", "profile_url", "channel_url",
+    "creator_or_business", "niche", "country", "city",
+    "subscribers", "avg_views", "business_email",
+    "instagram", "linkedin", "twitter_x", "website",
+    "recent_upload", "contact_type", "lead_source",
+    "status", "notes",
 ]
 
 YOUTUBE_SEARCH_QUERIES = [
-    "YouTuber creator",
-    "content creator channel",
-    "video creator",
-    "gaming channel",
-    "gameplay creator",
-    "comedy channel",
-    "entertainment channel",
-    "education channel",
-    "technology channel",
-    "tech review channel",
-    "gadget review channel",
-    "business channel",
-    "finance channel",
-    "lifestyle channel",
-    "daily vlog channel",
-    "travel channel",
-    "food cooking channel",
-    "fitness workout channel",
-    "beauty makeup channel",
-    "fashion channel",
-    "automotive car channel",
-    "photography filmmaking channel",
-    "USA YouTuber creator",
-    "UK YouTuber creator",
-    "Canadian YouTuber creator",
-    "Australian YouTuber creator",
+    "YouTuber creator", "content creator channel",
+    "video creator", "gaming channel", "gameplay creator",
+    "comedy channel", "entertainment channel",
+    "education channel", "technology channel",
+    "tech review channel", "gadget review channel",
+    "business channel", "finance channel", "lifestyle channel",
+    "daily vlog channel", "travel channel",
+    "food cooking channel", "fitness workout channel",
+    "beauty makeup channel", "fashion channel",
+    "automotive car channel", "photography filmmaking channel",
+    "USA YouTuber creator", "UK YouTuber creator",
+    "Canadian YouTuber creator", "Australian YouTuber creator",
     "Indian YouTuber creator",
 ]
 
@@ -225,8 +201,10 @@ def detect_niche(text):
         "Automotive": ["car", "cars", "automotive", "bike", "bikes"],
         "Comedy": ["comedy", "funny"],
         "Vlogging": ["vlog", "vlogging", "vlogger"],
-        "Video Editing": ["video editor", "video editing", "premiere pro",
-                          "after effects", "post production"],
+        "Video Editing": [
+            "video editor", "video editing", "premiere pro",
+            "after effects", "post production",
+        ],
     }
 
     for niche, keywords in niche_map.items():
@@ -296,7 +274,7 @@ def save_leads(leads):
 
 
 # ============================================================
-# YOUTUBE API
+# HTTP HELPER
 # ============================================================
 
 def get_json(url, params, headers=None):
@@ -319,6 +297,10 @@ def get_json(url, params, headers=None):
 
     return response.json()
 
+
+# ============================================================
+# YOUTUBE API
+# ============================================================
 
 def youtube_search(query):
     data = get_json(
@@ -425,11 +407,11 @@ def collect_youtube():
         channel_id = clean(channel.get("id", ""))
         custom_url = clean(snippet.get("customUrl", ""))
 
-        if custom_url:
-            profile_url = "https://www.youtube.com/" + custom_url.lstrip("/")
-        else:
-            profile_url = f"https://www.youtube.com/channel/{channel_id}"
-
+        profile_url = (
+            "https://www.youtube.com/" + custom_url.lstrip("/")
+            if custom_url
+            else f"https://www.youtube.com/channel/{channel_id}"
+        )
         channel_url = f"https://www.youtube.com/channel/{channel_id}"
 
         latest_upload = youtube_latest_upload(channel)
@@ -499,23 +481,76 @@ def collect_youtube():
 
 
 # ============================================================
-# X.COM API — OPTIONAL, REQUIRES AUTHORIZED API ACCESS
+# X API AUTHENTICATION
+# ============================================================
+
+def get_x_access_token():
+    if X_BEARER_TOKEN:
+        print("Using configured X Bearer Token.")
+        return X_BEARER_TOKEN
+
+    if not X_API_KEY or not X_API_SECRET:
+        print(
+            "X collection skipped: configure X_BEARER_TOKEN "
+            "or both X_API_KEY and X_API_SECRET."
+        )
+        return ""
+
+    token_url = "https://api.x.com/oauth2/token"
+
+    try:
+        response = requests.post(
+            token_url,
+            auth=HTTPBasicAuth(X_API_KEY, X_API_SECRET),
+            data={"grant_type": "client_credentials"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+
+        if response.status_code != 200:
+            print(
+                f"X token request failed: HTTP {response.status_code}: "
+                f"{response.text[:500]}"
+            )
+            return ""
+
+        token = clean(response.json().get("access_token", ""))
+
+        if not token:
+            print("X token request returned no access token.")
+            return ""
+
+        print("X API authentication successful.")
+        return token
+
+    except requests.RequestException as error:
+        print(f"X authentication request failed: {error}")
+        return ""
+
+
+# ============================================================
+# X.COM API — RECENT POSTS AND PUBLIC PROFILES
 # ============================================================
 
 def collect_x():
-    if not X_BEARER_TOKEN:
-        print("X collection skipped: X_BEARER_TOKEN is not configured.")
+    token = get_x_access_token()
+
+    if not token:
+        print("X collection skipped: authentication unavailable.")
         return []
 
     print("\n=== X.COM COLLECTION ===")
 
     headers = {
-        "Authorization": f"Bearer {X_BEARER_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "User-Agent": "lead-automation",
     }
 
     leads = []
     endpoint = "https://api.x.com/2/tweets/search/recent"
+    seen_users = set()
 
     for term in X_SEARCH_QUERIES:
         print(f"X search: {term}")
@@ -524,31 +559,44 @@ def collect_x():
             data = get_json(
                 endpoint,
                 {
-                    "query": f'{term} -is:retweet',
+                    "query": f"{term} -is:retweet",
                     "max_results": 10,
                     "expansions": "author_id",
-                    "user.fields": "name,username,description,public_metrics,url",
+                    "user.fields": (
+                        "name,username,description,public_metrics,url"
+                    ),
                 },
                 headers=headers,
             )
         except Exception as error:
-            print(f"X API request failed: {error}")
+            print(f"X API request failed for '{term}': {error}")
             continue
 
-        for user in data.get("includes", {}).get("users", []):
+        users = data.get("includes", {}).get("users", [])
+
+        for user in users:
+            username = clean(user.get("username", ""))
+            if not username:
+                continue
+
+            user_key = username.lower()
+            if user_key in seen_users:
+                continue
+            seen_users.add(user_key)
+
             metrics = user.get("public_metrics", {})
             followers = safe_int(metrics.get("followers_count", 0))
 
             if followers < MIN_SUBSCRIBERS:
                 continue
 
-            username = clean(user.get("username", ""))
-            if not username:
-                continue
-
             description = clean(user.get("description", ""))
             email = extract_email(description)
             public_url = clean(user.get("url", ""))
+
+            contacts = extract_public_contacts(
+                f"{description} {public_url}"
+            )
 
             leads.append(normalize_lead({
                 "name": clean(user.get("name", "")),
@@ -559,14 +607,13 @@ def collect_x():
                 "niche": detect_niche(f"{term} {description}"),
                 "country": "India" if "India" in term else "",
                 "city": "",
-                # This column stores follower count for X profiles.
                 "subscribers": followers,
                 "avg_views": "",
                 "business_email": email,
-                "instagram": "",
-                "linkedin": "",
+                "instagram": contacts["instagram"],
+                "linkedin": contacts["linkedin"],
                 "twitter_x": f"https://x.com/{username}",
-                "website": public_url,
+                "website": public_url or contacts["website"],
                 "recent_upload": "",
                 "contact_type": "Public X profile" + (
                     ", Business Email" if email else ""
@@ -574,11 +621,17 @@ def collect_x():
                 "lead_source": "X API Recent Search",
                 "status": "New",
                 "notes": (
-                    "Public profile discovered via recent search. "
+                    "Profile discovered from recent public post search. "
                     "Follower count stored in subscribers column. "
-                    "Confirm relevance and public contact details manually."
+                    "Confirm business relevance and contact details manually."
                 ),
             }))
+
+            if MAX_LEADS_PER_RUN > 0 and len(leads) >= MAX_LEADS_PER_RUN:
+                print(f"Reached MAX_LEADS_PER_RUN={MAX_LEADS_PER_RUN}.")
+                print("Stopping X collection at configured limit.")
+                print(f"X leads collected: {len(leads)}")
+                return leads
 
     print(f"X leads collected before deduplication: {len(leads)}")
     return leads
@@ -626,7 +679,6 @@ def upload_to_google_sheets(leads):
         print(f"Google Sheet connected: {spreadsheet.title}")
         print(f"Worksheet: {worksheet.title}")
 
-        # Preserve the existing A:T 20-column schema.
         worksheet.update(
             range_name="A1:T1",
             values=[CSV_HEADERS],
@@ -673,6 +725,7 @@ def upload_to_google_sheets(leads):
             final_keys.add(lead_key(row))
 
         verified = 0
+
         for values in rows_to_add:
             row = {
                 header: values[i] if i < len(values) else ""
@@ -698,7 +751,7 @@ def upload_to_google_sheets(leads):
 
 
 # ============================================================
-# MAIN
+# MAIN — PRESERVE CSV AND SHEETS WORKFLOW
 # ============================================================
 
 def main():
@@ -708,8 +761,10 @@ def main():
 
     if not YOUTUBE_API_KEY:
         raise RuntimeError("YOUTUBE_API_KEY is missing.")
+
     if not GOOGLE_SERVICE_ACCOUNT_JSON:
         raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is missing.")
+
     if not GOOGLE_SHEET_ID:
         raise RuntimeError("GOOGLE_SHEET_ID is missing.")
 
@@ -717,11 +772,11 @@ def main():
     existing_leads = read_csv()
     print(f"Existing CSV leads: {len(existing_leads)}")
 
-    # Collect from YouTube and optionally X.
+    # Collect from YouTube and X.
     collected = collect_youtube()
     collected.extend(collect_x())
 
-    # Preserve old CSV data and deduplicate by platform/profile.
+    # Preserve existing CSV rows and deduplicate.
     merged = []
     seen = set()
 
@@ -735,7 +790,7 @@ def main():
 
     save_leads(merged)
 
-    # Upload all rows; Google Sheets duplicate checks prevent repeat rows.
+    # Upload all existing and newly collected rows.
     if not upload_to_google_sheets(merged):
         raise RuntimeError("Google Sheets upload failed.")
 
