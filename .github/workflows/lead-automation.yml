@@ -3,7 +3,7 @@ name: lead-automation
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # Har 5 minute me chalega (Testing ke liye)
+    - cron: "*/5 * * * *"  # Testing ke liye har 5 min (Baad me 5 ghante ke liye: "0 */5 * * *")
 
 permissions:
   contents: read
@@ -38,7 +38,6 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python - <<'PY'
           import os
@@ -61,7 +60,7 @@ jobs:
                   print(f"- {key}")
               sys.exit(1)
 
-          print("Required YouTube and Google Sheets secrets are present.")
+          print("Required secrets are present.")
           PY
 
       - name: Run lead collector
@@ -72,4 +71,5 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SHEET_WORKSHEET: ${{ secrets.GOOGLE_SHEET_WORKSHEET }}
+          SEARCH_ENGINE_ID: ${{ secrets.SEARCH_ENGINE_ID }}
         run: python -u src/lead_collector.py
