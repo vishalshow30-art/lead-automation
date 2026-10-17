@@ -1,11 +1,9 @@
-
 name: lead-automation
 
 on:
   workflow_dispatch:
-  # Uncomment these lines only if you want an automatic run every 5 minutes.
-  # schedule:
-  #   - cron: "*/5 * * * *"
+  schedule:
+    - cron: "*/5 * * * *"  # Testing ke liye har 5 min (GitHub minimum 5 min allow karta hai)
 
 permissions:
   contents: read
@@ -16,25 +14,8 @@ concurrency:
 
 jobs:
   lead-automation:
-    name: Collect and save leads
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    env:
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-      GOOGLE_SHEET_WORKSHEET: "Sheet1"
-
-      X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-      X_API_KEY: ${{ secrets.X_API_KEY }}
-      X_API_SECRET: ${{ secrets.X_API_SECRET }}
-
-      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
-      FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
-      LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
-
-      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout repository
@@ -44,56 +25,125 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
           cache-dependency-path: requirements.txt
-
-      - name: Check required secrets
-        shell: bash
-        run: |
-          set -e
-
-          if [ -z "$YOUTUBE_API_KEY" ]; then
-            echo "::warning::YOUTUBE_API_KEY is missing."
-          else
-            echo "YouTube API key is configured."
-          fi
-
-          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
-            echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON is missing."
-            exit 1
-          fi
-
-          if [ -z "$GOOGLE_SHEET_ID" ]; then
-            echo "::error::GOOGLE_SHEET_ID is missing."
-            exit 1
-          fi
-
-          if [ -z "$X_BEARER_TOKEN" ]; then
-            echo "::warning::X_BEARER_TOKEN is missing; X collection will be skipped."
-          else
-            echo "X Bearer Token is configured."
-          fi
-
-          echo "Required Google Sheets secrets are configured."
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
 
-      - name: Validate Python syntax
+      - name: Check required secrets
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python -m py_compile src/lead_collector.py
+          python - <<'PY'
+          import os
+          import sys
+
+          required = [
+              "YOUTUBE_API_KEY",
+              "GOOGLE_SERVICE_ACCOUNT_JSON",
+              "GOOGLE_SHEET_ID",
+          ]
+
+          missing = [
+              key for key in required
+              if not os.environ.get(key, "").strip()
+          ]
+
+          if missing:
+              print("Missing required GitHub secrets:")
+              for key in missing:
+                  print(f"- {key}")
+              sys.exit(1)
+
+          print("Required YouTube and Google Sheets secrets are present.")
+          PY
 
       - name: Run lead collector
-        run: |
-          python src/lead_collector.py
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_SEARCH_QUERY: ${{ vars.YOUTUBE_SEARCH_QUERY }}
+          ACTIVE_DAYS: "180"
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_WORKSHEET: ${{ secrets.GOOGLE_SHEET_WORKSHEET }}
+        run: python -u src/lead_collector.pyname: lead-automation
 
-      - name: Upload CSV artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"  # Testing ke liye har 5 min (GitHub minimum 5 min allow karta hai)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lead-automation
+  cancel-in-progress: false
+
+jobs:
+  lead-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          name: lead-automation-csv
-          path: data/leads.csv
-          if-no-files-found: warn
-          retention-days: 7
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check required secrets
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          required = [
+              "YOUTUBE_API_KEY",
+              "GOOGLE_SERVICE_ACCOUNT_JSON",
+              "GOOGLE_SHEET_ID",
+          ]
+
+          missing = [
+              key for key in required
+              if not os.environ.get(key, "").strip()
+          ]
+
+          if missing:
+              print("Missing required GitHub secrets:")
+              for key in missing:
+                  print(f"- {key}")
+              sys.exit(1)
+
+          print("Required YouTube and Google Sheets secrets are present.")
+          PY
+
+      - name: Run lead collector
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_SEARCH_QUERY: ${{ vars.YOUTUBE_SEARCH_QUERY }}
+          ACTIVE_DAYS: "180"
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_WORKSHEET: ${{ secrets.GOOGLE_SHEET_WORKSHEET }}
+        run: python -u src/lead_collector.py
