@@ -2,16 +2,17 @@ import os
 import sys
 import json
 import re
+import requests
 from googleapiclient.discovery import build
 import gspread
 from google.oauth2.service_account import Credentials
 
-# 1. Environment Variables check
+# 1. Environment Variables
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 WORKSHEET_NAME = os.environ.get("GOOGLE_SHEET_WORKSHEET") or "Sheet1"
 SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-CUSTOM_QUERY = os.environ.get("YOUTUBE_SEARCH_QUERY")
+SEARCH_ENGINE_ID = os.environ.get("SEARCH_ENGINE_ID")  # Free Google CSE ID
 
 if not all([YOUTUBE_API_KEY, GOOGLE_SHEET_ID, SERVICE_ACCOUNT_JSON]):
     print("❌ Critical Error: Environment secrets missing.")
@@ -34,12 +35,11 @@ def connect_google_sheet():
         except:
             worksheet = spreadsheet.sheet1
 
-        # Check agar headers banani hai
         existing_rows = worksheet.get_all_values()
         if not existing_rows:
             headers = [
-                "Channel ID", "Channel Title", "Subscribers", 
-                "Country", "Email", "Instagram", "Twitter/X", "Channel URL"
+                "Platform", "Lead ID / Link", "Title / Name", "Details / Subs", 
+                "Email", "Social Link"
             ]
             worksheet.append_row(headers)
         
@@ -48,104 +48,147 @@ def connect_google_sheet():
         print(f"❌ Google Sheets Connection Error: {e}")
         sys.exit(1)
 
-# Contact info helper regex
-def parse_contacts(text):
-    email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
-    insta_pattern = r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)'
-    x_pattern = r'(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)'
+# Helpers for contacts
+def parse_email(text):
+    match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
+    return match.group(0) if match else "N/A"
 
-    email = re.search(email_pattern, text)
-    insta = re.search(insta_pattern, text, re.IGNORECASE)
-    x_handle = re.search(x_pattern, text, re.IGNORECASE)
-
-    return (
-        email.group(0) if email else "N/A",
-        insta.group(0) if insta else "N/A",
-        x_handle.group(0) if x_handle else "N/A"
-    )
-
-# 3. YouTube Data Extraction
-def collect_leads(existing_ids):
-    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+def parse_socials(text):
+    insta = re.search(r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
+    x_acc = re.search(r'(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)', text, re.IGNORECASE)
     
-    # Diverse Indian & International targets
-    default_queries = [
+    social = "N/A"
+    if insta:
+        social = insta.group(0)
+    elif x_acc:
+        social = x_acc.group(0)
+    return social
+
+# 3. YouTube Leads Fetcher
+def collect_youtube_leads(existing_ids):
+    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+    queries = [
         "podcast clips hindi", "tech creator india", "vlog creator usa",
-        "finance creator uk", "fitness coach international", "gaming highlights india"
+        "finance creator uk", "fitness coach international"
     ]
     
-    queries = [CUSTOM_QUERY] if CUSTOM_QUERY else default_queries
     new_leads = []
-
     for q in queries:
         try:
-            print(f"Searching niche: {q}")
-            req = youtube.search().list(
-                q=q,
-                part="snippet",
-                type="channel",
-                maxResults=15
-            )
+            req = youtube.search().list(q=q, part="snippet", type="channel", maxResults=10)
             res = req.execute()
-
             channel_ids = [item["id"]["channelId"] for item in res.get("items", [])]
-            # Pehle hi filter karlo taaki repeat call na ho
             unique_ids = [cid for cid in channel_ids if cid not in existing_ids]
 
             if not unique_ids:
                 continue
 
-            # Fetch detailed channel info
-            chan_req = youtube.channels().list(
-                part="snippet,statistics",
-                id=",".join(unique_ids)
-            )
+            chan_req = youtube.channels().list(part="snippet,statistics", id=",".join(unique_ids))
             chan_res = chan_req.execute()
 
             for chan in chan_res.get("items", []):
                 cid = chan["id"]
-                snippet = chan.get("snippet", {})
                 stats = chan.get("statistics", {})
-
                 subs = int(stats.get("subscriberCount", 0))
-                # 20k minimum subscribers condition
-                if subs < 20000:
+
+                if subs < 20000:  # 20k+ filter
                     continue
 
+                snippet = chan.get("snippet", {})
                 title = snippet.get("title", "")
-                country = snippet.get("country", "Global")
                 desc = snippet.get("description", "")
-                url = f"https://www.youtube.com/channel/{cid}"
+                channel_url = f"https://www.youtube.com/channel/{cid}"
 
-                email, insta, x_acc = parse_contacts(desc)
+                email = parse_email(desc)
+                social = parse_socials(desc)
 
-                lead_row = [cid, title, subs, country, email, insta, x_acc, url]
+                lead_row = ["YouTube", channel_url, title, f"{subs} subs", email, social]
                 new_leads.append(lead_row)
-                existing_ids.add(cid)  # Same run me duplicate na aaye
+                existing_ids.add(channel_url)
 
-        except Exception as err:
-            print(f"⚠️ Query '{q}' me error: {err}")
+        except Exception as e:
+            print(f"⚠️ YouTube Query '{q}' error: {e}")
 
     return new_leads
 
-# 4. Main Process
+# 4. Google Free Search (Instagram, LinkedIn, Twitter) Fetcher
+def collect_web_social_leads(existing_ids):
+    if not SEARCH_ENGINE_ID:
+        print("ℹ️ SEARCH_ENGINE_ID secret not found. Skipping Google CSE web search.")
+        return []
+
+    # Dork queries jo Instagram, LinkedIn aur Twitter par video editing clients khojti hain
+    search_queries = [
+        'site:instagram.com ("podcaster" OR "content creator") ("@gmail.com" OR "contact")',
+        'site:linkedin.com/in/ ("YouTuber" OR "Video Creator" OR "Founder") India',
+        'site:twitter.com ("looking for video editor" OR "need video editor")'
+    ]
+
+    new_leads = []
+    base_url = "https://www.googleapis.com/customsearch/v1"
+
+    for query in search_queries:
+        try:
+            params = {
+                "key": YOUTUBE_API_KEY,  # Same Google API key works
+                "cx": SEARCH_ENGINE_ID,
+                "q": query,
+                "num": 5
+            }
+            resp = requests.get(base_url, params=params).json()
+            items = resp.get("items", [])
+
+            for item in items:
+                link = item.get("link", "")
+                if link in existing_ids:
+                    continue
+
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+                
+                # Platform identify karna
+                platform = "Web"
+                if "instagram.com" in link:
+                    platform = "Instagram"
+                elif "linkedin.com" in link:
+                    platform = "LinkedIn"
+                elif "twitter.com" in link or "x.com" in link:
+                    platform = "Twitter/X"
+
+                email = parse_email(snippet + " " + title)
+
+                lead_row = [platform, link, title, "Web Lead", email, link]
+                new_leads.append(lead_row)
+                existing_ids.add(link)
+
+        except Exception as e:
+            print(f"⚠️ Web Search Error for '{query}': {e}")
+
+    return new_leads
+
+# 5. Main Automation
 def main():
     print("Connecting to Google Sheets...")
     sheet = connect_google_sheet()
 
-    # Column 1 se saari existing Channel IDs nikal kar duplicate check karenge
-    existing_channel_ids = set(sheet.col_values(1))
-    print(f"Total existing leads in sheet: {len(existing_channel_ids)}")
+    # Column 2 (Link/ID) check karke duplicates filter karenge
+    existing_links = set(sheet.col_values(2))
+    print(f"Total existing leads in sheet: {len(existing_links)}")
 
-    print("Fetching creator leads from YouTube...")
-    leads = collect_leads(existing_channel_ids)
+    print("Fetching leads from YouTube...")
+    yt_leads = collect_youtube_leads(existing_links)
 
-    if leads:
-        print(f"Saving {len(leads)} new leads into Google Sheet...")
-        sheet.append_rows(leads)
+    print("Fetching leads from Instagram / LinkedIn / Twitter via Google CSE...")
+    web_leads = collect_web_social_leads(existing_links)
+
+    all_leads = yt_leads + web_leads
+
+    if all_leads:
+        print(f"Saving {len(all_leads)} new leads into Google Sheet...")
+        sheet.append_rows(all_leads)
         print("✅ Data successfully saved in Google Sheet!")
     else:
-        print("ℹ️ Koi nayi lead nahi mili ya criteria (<20k subs) match nahi hua.")
+        print("ℹ️ No new leads found matching criteria.")
 
 if __name__ == "__main__":
     main()
