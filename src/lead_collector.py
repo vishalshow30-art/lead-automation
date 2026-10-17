@@ -6,81 +6,99 @@ from googleapiclient.discovery import build
 import gspread
 from google.oauth2.service_account import Credentials
 
-# Environment Variables
+# 1. Environment Variables check
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
-WORKSHEET_NAME = os.environ.get("GOOGLE_SHEET_WORKSHEET", "Sheet1")
+WORKSHEET_NAME = os.environ.get("GOOGLE_SHEET_WORKSHEET") or "Sheet1"
 SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+CUSTOM_QUERY = os.environ.get("YOUTUBE_SEARCH_QUERY")
 
 if not all([YOUTUBE_API_KEY, GOOGLE_SHEET_ID, SERVICE_ACCOUNT_JSON]):
-    print("❌ Error: Missing required environment variables!")
+    print("❌ Critical Error: Environment secrets missing.")
     sys.exit(1)
 
-def get_sheet():
+# 2. Google Sheets Setup
+def connect_google_sheet():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(GOOGLE_SHEET_ID)
     try:
-        worksheet = sh.worksheet(WORKSHEET_NAME)
-    except:
-        worksheet = sh.sheet1
-    
-    headers = [
-        "Channel ID", "Channel Name", "Subscribers", 
-        "Email", "Instagram", "Twitter/X", "Channel URL"
-    ]
-    existing = worksheet.get_all_values()
-    if not existing:
-        worksheet.append_row(headers)
-    return worksheet
+        creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+        
+        try:
+            worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
+        except:
+            worksheet = spreadsheet.sheet1
 
-def extract_contact_info(text):
-    email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
-    email = email_match.group(0) if email_match else "N/A"
-    
-    insta_match = re.search(r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
-    instagram = insta_match.group(0) if insta_match else "N/A"
-    
-    twitter_match = re.search(r'(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)', text, re.IGNORECASE)
-    twitter = twitter_match.group(0) if twitter_match else "N/A"
-    
-    return email, instagram, twitter
+        # Check agar headers banani hai
+        existing_rows = worksheet.get_all_values()
+        if not existing_rows:
+            headers = [
+                "Channel ID", "Channel Title", "Subscribers", 
+                "Country", "Email", "Instagram", "Twitter/X", "Channel URL"
+            ]
+            worksheet.append_row(headers)
+        
+        return worksheet
+    except Exception as e:
+        print(f"❌ Google Sheets Connection Error: {e}")
+        sys.exit(1)
 
-def fetch_creators(existing_ids):
+# Contact info helper regex
+def parse_contacts(text):
+    email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+    insta_pattern = r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)'
+    x_pattern = r'(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)'
+
+    email = re.search(email_pattern, text)
+    insta = re.search(insta_pattern, text, re.IGNORECASE)
+    x_handle = re.search(x_pattern, text, re.IGNORECASE)
+
+    return (
+        email.group(0) if email else "N/A",
+        insta.group(0) if insta else "N/A",
+        x_handle.group(0) if x_handle else "N/A"
+    )
+
+# 3. YouTube Data Extraction
+def collect_leads(existing_ids):
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
     
-    # Mix of Indian and International niches
-    queries = [
-        "vlog hindi", "tech unboxing india", "gaming live hindi",
-        "finance creator usa", "lifestyle vlog uk", "fitness coach us"
+    # Diverse Indian & International targets
+    default_queries = [
+        "podcast clips hindi", "tech creator india", "vlog creator usa",
+        "finance creator uk", "fitness coach international", "gaming highlights india"
     ]
     
+    queries = [CUSTOM_QUERY] if CUSTOM_QUERY else default_queries
     new_leads = []
 
-    for query in queries:
+    for q in queries:
         try:
+            print(f"Searching niche: {q}")
             req = youtube.search().list(
-                q=query,
+                q=q,
                 part="snippet",
                 type="channel",
-                maxResults=10
+                maxResults=15
             )
             res = req.execute()
 
             channel_ids = [item["id"]["channelId"] for item in res.get("items", [])]
-            channel_ids = [cid for cid in channel_ids if cid not in existing_ids]
+            # Pehle hi filter karlo taaki repeat call na ho
+            unique_ids = [cid for cid in channel_ids if cid not in existing_ids]
 
-            if not channel_ids:
+            if not unique_ids:
                 continue
 
+            # Fetch detailed channel info
             chan_req = youtube.channels().list(
                 part="snippet,statistics",
-                id=",".join(channel_ids)
+                id=",".join(unique_ids)
             )
             chan_res = chan_req.execute()
 
@@ -90,40 +108,44 @@ def fetch_creators(existing_ids):
                 stats = chan.get("statistics", {})
 
                 subs = int(stats.get("subscriberCount", 0))
-                if subs < 20000:  # 20k minimum limit
+                # 20k minimum subscribers condition
+                if subs < 20000:
                     continue
 
-                desc = snippet.get("description", "")
                 title = snippet.get("title", "")
-                email, insta, twitter = extract_contact_info(desc)
-                channel_url = f"https://www.youtube.com/channel/{cid}"
+                country = snippet.get("country", "Global")
+                desc = snippet.get("description", "")
+                url = f"https://www.youtube.com/channel/{cid}"
 
-                lead = [cid, title, subs, email, insta, twitter, channel_url]
-                new_leads.append(lead)
-                existing_ids.add(cid)
+                email, insta, x_acc = parse_contacts(desc)
 
-        except Exception as e:
-            print(f"Error fetching '{query}': {e}")
+                lead_row = [cid, title, subs, country, email, insta, x_acc, url]
+                new_leads.append(lead_row)
+                existing_ids.add(cid)  # Same run me duplicate na aaye
+
+        except Exception as err:
+            print(f"⚠️ Query '{q}' me error: {err}")
 
     return new_leads
 
+# 4. Main Process
 def main():
-    print("Setting up Google Sheet connection...")
-    sheet = get_sheet()
-    
-    existing_records = sheet.col_values(1)
-    existing_ids = set(existing_records)
-    print(f"Already tracking {len(existing_ids)} channels.")
+    print("Connecting to Google Sheets...")
+    sheet = connect_google_sheet()
 
-    print("Searching for new creator leads...")
-    leads = fetch_creators(existing_ids)
+    # Column 1 se saari existing Channel IDs nikal kar duplicate check karenge
+    existing_channel_ids = set(sheet.col_values(1))
+    print(f"Total existing leads in sheet: {len(existing_channel_ids)}")
+
+    print("Fetching creator leads from YouTube...")
+    leads = collect_leads(existing_channel_ids)
 
     if leads:
-        print(f"Appending {len(leads)} new creators to sheet.")
+        print(f"Saving {len(leads)} new leads into Google Sheet...")
         sheet.append_rows(leads)
-        print("✅ Success!")
+        print("✅ Data successfully saved in Google Sheet!")
     else:
-        print("ℹ️ No new unique leads found.")
+        print("ℹ️ Koi nayi lead nahi mili ya criteria (<20k subs) match nahi hua.")
 
 if __name__ == "__main__":
     main()
