@@ -20,16 +20,15 @@ SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 SEARCH_ENGINE_ID = os.environ.get("SEARCH_ENGINE_ID")
 CUSTOM_QUERY = os.environ.get("YOUTUBE_SEARCH_QUERY") or os.environ.get("SEARCH_QUERY")
 
-# 5 घंटे की एग्जैक्ट टाइमिंग (5 * 3600 = 18000 सेकंड्स)
 TOTAL_RUN_SECONDS = 5 * 60 * 60  
-SLEEP_INTERVAL_SECONDS = 240     # हर 4 मिनट में नया बैच स्क्रैप होगा
+SLEEP_INTERVAL_SECONDS = 300     
 
 if not all([YOUTUBE_API_KEY, GOOGLE_SHEET_ID, SERVICE_ACCOUNT_JSON]):
     print("❌ Critical Error: Required secrets missing!")
     sys.exit(1)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 }
 
 TARGET_COLUMNS = [
@@ -37,6 +36,22 @@ TARGET_COLUMNS = [
     "niche", "country", "city", "subscribers", "avg_views",
     "business_email", "instagram", "linkedin", "twitter_x", "website",
     "recent_upload", "contact_type", "lead_source", "status", "notes"
+]
+
+# Dynamic broader search pools to prevent hitting same results
+INSTA_KEYWORD_POOL = [
+    "video creator india gmail.com", "content creator contact gmail.com",
+    "filmmaker delhi email", "vlogger mumbai business",
+    "tech creator bangalore collaboration", "fitness coach india email",
+    "digital creator jaipur contact", "youtuber kolkata business",
+    "podcast host india email", "influencer hyderabad collab"
+]
+
+YOUTUBE_KEYWORD_POOL = [
+    "tech unboxing hindi", "podcast clips india", "finance tips hindi",
+    "fitness trainer hindi", "vlog channel india", "gaming creator hindi",
+    "startup founder india", "digital marketing hindi", "movie review hindi",
+    "education channel india"
 ]
 
 # ==========================================
@@ -81,7 +96,7 @@ def extract_email(text):
     clean = clean.replace("[dot]", ".").replace("(dot)", ".").replace(" dot ", ".")
     pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
     matches = re.findall(pattern, clean)
-    valid = [m for m in matches if not m.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))]
+    valid = [m for m in matches if not m.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif'))]
     return valid[0] if valid else ""
 
 def extract_socials_and_web(text):
@@ -90,7 +105,7 @@ def extract_socials_and_web(text):
         return data
 
     insta = re.search(r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
-    if insta and insta.group(1).lower() not in ["p", "reel", "stories", "explore"]:
+    if insta and insta.group(1).lower() not in ["p", "reel", "stories", "explore", "tv"]:
         data["instagram"] = f"https://www.instagram.com/{insta.group(1)}"
 
     linkedin = re.search(r'(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(?:in|company)\/([a-zA-Z0-9_-]+)', text, re.IGNORECASE)
@@ -113,12 +128,11 @@ def extract_socials_and_web(text):
 def detect_niche(query_str, content=""):
     combined = f"{query_str} {content}".lower()
     niches = [
-        ("tech/gadgets", ["tech", "gadget", "smartphone", "laptop", "unboxing", "review"]),
-        ("tech/computer", ["computer", "pc build", "windows", "coding", "software"]),
-        ("podcast", ["podcast", "interview", "clips", "conversation"]),
-        ("fitness", ["fitness", "gym", "workout", "coach", "diet"]),
-        ("finance", ["finance", "crypto", "trading", "stocks", "money"]),
-        ("entertainment", ["roast", "comedy", "funny", "vlog", "meme"])
+        ("tech/gadgets", ["tech", "gadget", "smartphone", "laptop", "unboxing", "review", "computer", "pc"]),
+        ("podcast", ["podcast", "interview", "clips", "conversation", "show"]),
+        ("fitness", ["fitness", "gym", "workout", "coach", "diet", "bodybuilding", "trainer"]),
+        ("finance", ["finance", "crypto", "trading", "stocks", "money", "investing", "business"]),
+        ("entertainment", ["roast", "comedy", "funny", "vlog", "lifestyle", "meme", "entertainment"])
     ]
     for name, keywords in niches:
         if any(kw in combined for kw in keywords):
@@ -174,25 +188,23 @@ def run_scrape_batch(existing_ids, round_num):
     print(f"==========================================")
     new_leads = []
 
-    # 1. Instagram Search
-    insta_queries = [
-        'site:instagram.com "video creator" india gmail.com',
-        'site:instagram.com "podcaster" india contact gmail.com',
-        'site:instagram.com "reels creator" india gmail.com'
-    ]
+    # 1. Dynamic Instagram Search
+    import random
+    selected_insta_queries = random.sample(INSTA_KEYWORD_POOL, 3)
     base_url = "https://www.googleapis.com/customsearch/v1"
 
-    for q in insta_queries:
+    for q in selected_insta_queries:
+        query_terms = f"site:instagram.com {q}"
         items = []
         if SEARCH_ENGINE_ID and YOUTUBE_API_KEY:
             try:
-                params = {"key": YOUTUBE_API_KEY, "cx": SEARCH_ENGINE_ID, "q": q, "num": 10}
+                params = {"key": YOUTUBE_API_KEY, "cx": SEARCH_ENGINE_ID, "q": query_terms, "num": 10}
                 resp = requests.get(base_url, params=params, timeout=12).json()
-                items = resp.get("items", []) if "error" not in resp else fallback_search(q)
+                items = resp.get("items", []) if "error" not in resp else fallback_search(query_terms)
             except Exception:
-                items = fallback_search(q)
+                items = fallback_search(query_terms)
         else:
-            items = fallback_search(q)
+            items = fallback_search(query_terms)
 
         for item in items:
             link = item.get("link", "").strip()
@@ -219,10 +231,10 @@ def run_scrape_batch(existing_ids, round_num):
             new_leads.append(row)
             existing_ids.add(link)
 
-    # 2. YouTube Search
+    # 2. Dynamic YouTube Search
     try:
         youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-        yt_queries = ["tech review hindi", "podcast clips hindi", "computer unboxing hindi", "finance creator hindi"]
+        yt_queries = random.sample(YOUTUBE_KEYWORD_POOL, 2)
         if CUSTOM_QUERY:
             yt_queries = [CUSTOM_QUERY]
 
@@ -244,7 +256,7 @@ def run_scrape_batch(existing_ids, round_num):
                 snippet = chan.get("snippet", {})
                 subs = int(stats.get("subscriberCount", 0))
 
-                if subs < 8000:
+                if subs < 5000:
                     continue
 
                 title = snippet.get("title", "")
@@ -285,9 +297,9 @@ def main():
     end_time = start_time + TOTAL_RUN_SECONDS
 
     print("=" * 60)
-    print("🚀 CONTINUOUS 5-HOUR ENGINE STARTED")
+    print("🚀 DYNAMIC 5-HOUR ENGINE STARTED")
     print(f"⏱️ Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("⏱️ System 5 ghante chalega aur fir apne aap OFF ho jayega.")
+    print("⏱️ System rotating keywords to maximize fresh leads.")
     print("=" * 60)
 
     sheet = connect_google_sheet()
@@ -308,7 +320,7 @@ def main():
         remaining_sec = int(end_time - time.time())
         rem_hrs = remaining_sec // 3600
         rem_mins = (remaining_sec % 3600) // 60
-        print(f"\n⏳ Time Remaining in 5-Hour Session: {rem_hrs} hours, {rem_mins} minutes")
+        print(f"\n⏳ Time Remaining in Session: {rem_hrs} hours, {rem_mins} minutes")
 
         fresh_leads = run_scrape_batch(existing_ids, batch_count)
 
@@ -319,13 +331,12 @@ def main():
                 sheet.append_rows(fresh_leads[i:i + chunk_size])
                 time.sleep(1)
             total_leads_added += len(fresh_leads)
-            print(f"✅ Leads added to sheet! Total saved in this session: {total_leads_added}")
+            print(f"✅ Leads added! Total saved in this session: {total_leads_added}")
         else:
             print("ℹ️ No new unique leads this batch (avoiding duplicates).")
 
         batch_count += 1
 
-        # Check if 5 hours are reached
         if time.time() + SLEEP_INTERVAL_SECONDS >= end_time:
             break
 
