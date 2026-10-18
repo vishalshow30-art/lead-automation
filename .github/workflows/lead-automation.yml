@@ -2,8 +2,6 @@ name: lead-automation
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"  # Har 5 minute me run hoga (baad me: "0 */5 * * *")
 
 permissions:
   contents: read
@@ -15,7 +13,7 @@ concurrency:
 jobs:
   lead-automation:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 330
 
     steps:
       - name: Checkout repository
@@ -63,11 +61,10 @@ jobs:
           print("✅ All required secrets are present.")
           PY
 
-      - name: Run lead collector
+      - name: Run lead collector (5-Hour Continuous Session)
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_SEARCH_QUERY: ${{ vars.YOUTUBE_SEARCH_QUERY }}
-          ACTIVE_DAYS: "180"
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SHEET_WORKSHEET: ${{ secrets.GOOGLE_SHEET_WORKSHEET }}
