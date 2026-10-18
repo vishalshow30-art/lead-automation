@@ -16,7 +16,7 @@ SEARCH_ENGINE_ID = os.environ.get("SEARCH_ENGINE_ID")
 CUSTOM_QUERY = os.environ.get("YOUTUBE_SEARCH_QUERY")
 
 if not all([YOUTUBE_API_KEY, GOOGLE_SHEET_ID, SERVICE_ACCOUNT_JSON]):
-    print("❌ Error: Essential secrets (YouTube API, Sheet ID, Service Account) missing!")
+    print("❌ Error: Essential secrets missing!")
     sys.exit(1)
 
 # 2. Google Sheets Connection
@@ -36,7 +36,6 @@ def connect_google_sheet():
         except Exception:
             worksheet = spreadsheet.sheet1
 
-        # Sheet header initialize if empty
         existing_rows = worksheet.get_all_values()
         if not existing_rows:
             headers = [
@@ -50,7 +49,7 @@ def connect_google_sheet():
         print(f"❌ Google Sheets Connection Error: {e}")
         sys.exit(1)
 
-# Helpers for contact parsing
+# Regex helpers
 def extract_email(text):
     match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
     return match.group(0) if match else "N/A"
@@ -65,14 +64,15 @@ def extract_socials(text):
         return x_acc.group(0)
     return "N/A"
 
-# 3. YouTube Scraping (20k+ Subscribers Filter)
+# 3. YouTube Scraping (Indian + International 20k+ Filter)
 def collect_youtube_leads(existing_ids):
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-    # Indian aur International mixed niches
     default_queries = [
-        "podcast clips hindi", "tech creator india", "vlog creator usa",
-        "finance creator uk", "fitness coach international", "gaming highlights india"
+        # Indian Niches
+        "podcast clips hindi", "tech review india", "roast video hindi", "vlog hindi",
+        # International Niches
+        "podcast clips usa", "finance creator uk", "fitness coach usa", "lifestyle vlog us", "business creator canada"
     ]
 
     queries = [CUSTOM_QUERY] if CUSTOM_QUERY else default_queries
@@ -124,20 +124,32 @@ def collect_youtube_leads(existing_ids):
                 existing_ids.add(cid)
 
         except Exception as e:
-            print(f"⚠️ YouTube search error on query '{q}': {e}")
+            print(f"⚠️ YouTube error on query '{q}': {e}")
 
     return new_leads
 
-# 4. Google Free Web Search (Instagram, LinkedIn, Twitter/X)
+# 4. Multi-Platform Web Search via Google API (Instagram, Facebook, LinkedIn, Twitter/X)
 def collect_web_social_leads(existing_ids):
     if not SEARCH_ENGINE_ID:
-        print("ℹ️ SEARCH_ENGINE_ID secret not found. Skipping Instagram/LinkedIn search.")
+        print("ℹ️ SEARCH_ENGINE_ID missing. Skipping Web.")
         return []
 
+    # High-intent targeted queries across platforms
     search_queries = [
-        'site:instagram.com ("video creator" OR "podcaster" OR "vlogger") ("@gmail.com" OR "contact")',
-        'site:linkedin.com/in/ ("content creator" OR "video editor" OR "founder") India',
-        'site:twitter.com ("looking for video editor" OR "need video editor")'
+        # Instagram Creators with emails in bio
+        'site:instagram.com ("podcast" OR "vlogger" OR "fitness creator") ("@gmail.com" OR "contact")',
+        'site:instagram.com ("creator" OR "reels creator") India ("@gmail.com")',
+        
+        # Twitter/X Clients looking for video editors right now
+        'site:twitter.com ("looking for video editor" OR "need video editor" OR "hiring video editor")',
+        'site:twitter.com ("dm for edits" OR "need short form editor")',
+
+        # LinkedIn Creators & Founders
+        'site:linkedin.com/in/ ("content creator" OR "youtube creator" OR "founder") India',
+        'site:linkedin.com/in/ ("video creator" OR "creative director") USA',
+
+        # Facebook Pages / Groups for content creators
+        'site:facebook.com ("video creator" OR "content creator") ("contact" OR "@gmail.com")'
     ]
 
     new_leads = []
@@ -150,7 +162,7 @@ def collect_web_social_leads(existing_ids):
                 "key": YOUTUBE_API_KEY,
                 "cx": SEARCH_ENGINE_ID,
                 "q": query,
-                "num": 5
+                "num": 10  # Maximum allowed per request
             }
             resp = requests.get(base_url, params=params).json()
             items = resp.get("items", [])
@@ -163,6 +175,7 @@ def collect_web_social_leads(existing_ids):
                 title = item.get("title", "")
                 snippet = item.get("snippet", "")
 
+                # Detect Platform
                 platform = "Web"
                 if "instagram.com" in link:
                     platform = "Instagram"
@@ -170,10 +183,13 @@ def collect_web_social_leads(existing_ids):
                     platform = "LinkedIn"
                 elif "twitter.com" in link or "x.com" in link:
                     platform = "Twitter/X"
+                elif "facebook.com" in link:
+                    platform = "Facebook"
 
+                # Extract contact email from snippet + title
                 email = extract_email(snippet + " " + title)
 
-                lead_row = [platform, link, title, "Creator Profile", email, link]
+                lead_row = [platform, link, title, "Targeted Lead", email, link]
                 new_leads.append(lead_row)
                 existing_ids.add(link)
 
@@ -182,19 +198,18 @@ def collect_web_social_leads(existing_ids):
 
     return new_leads
 
-# 5. Main Execution Flow
+# 5. Main Execution
 def main():
     print("Connecting to Google Sheets...")
     sheet = connect_google_sheet()
 
-    # Column 2 check karta hai (URL / ID) taaki repeat data sheet me na jaye
     existing_records = set(sheet.col_values(2))
     print(f"Total existing records in sheet: {len(existing_records)}")
 
     print("Fetching creator leads from YouTube...")
     yt_leads = collect_youtube_leads(existing_records)
 
-    print("Fetching leads from Instagram / LinkedIn / Twitter...")
+    print("Fetching multi-platform leads from Instagram / LinkedIn / Twitter / Facebook...")
     web_leads = collect_web_social_leads(existing_records)
 
     all_leads = yt_leads + web_leads
@@ -204,7 +219,7 @@ def main():
         sheet.append_rows(all_leads)
         print("✅ Data successfully saved in Google Sheet!")
     else:
-        print("ℹ️ No new leads found or all were duplicates.")
+        print("ℹ️ No new unique leads found.")
 
 if __name__ == "__main__":
     main()
