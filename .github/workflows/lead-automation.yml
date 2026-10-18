@@ -3,7 +3,7 @@ name: lead-automation
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # Testing ke liye har 5 min (Baad me 5 ghante ke liye: "0 */5 * * *")
+    - cron: "*/5 * * * *"  # Har 5 minute me run hoga (baad me: "0 */5 * * *")
 
 permissions:
   contents: read
@@ -55,12 +55,12 @@ jobs:
           ]
 
           if missing:
-              print("Missing required GitHub secrets:")
+              print("❌ Missing required GitHub secrets:")
               for key in missing:
                   print(f"- {key}")
               sys.exit(1)
 
-          print("Required secrets are present.")
+          print("✅ All required secrets are present.")
           PY
 
       - name: Run lead collector
@@ -72,4 +72,5 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SHEET_WORKSHEET: ${{ secrets.GOOGLE_SHEET_WORKSHEET }}
           SEARCH_ENGINE_ID: ${{ secrets.SEARCH_ENGINE_ID }}
+          PYTHONUNBUFFERED: "1"
         run: python -u src/lead_collector.py
