@@ -55,7 +55,7 @@ def connect_google_sheet():
         sys.exit(1)
 
 # ==========================================
-# 3. Deep Extraction Regex Utilities
+# 3. Extraction Regex Helpers
 # ==========================================
 def extract_email(text):
     if not text:
@@ -84,44 +84,168 @@ def extract_social_handle(text):
     return "N/A"
 
 # ==========================================
-# 4. YouTube Scraper (10k+ Filter)
+# 4. PRIORITY #1: Instagram Search Engine
+# ==========================================
+def collect_instagram_leads(existing_ids):
+    if not SEARCH_ENGINE_ID:
+        print("⚠️ SEARCH_ENGINE_ID missing! Instagram search nahi chal sakta.")
+        return []
+
+    # Instagram specific simplified search terms
+    insta_queries = [
+        'site:instagram.com video creator gmail.com',
+        'site:instagram.com podcaster contact gmail.com',
+        'site:instagram.com reels creator india gmail.com',
+        'site:instagram.com fitness coach gmail.com',
+        'site:instagram.com content creator dm for edits'
+    ]
+
+    new_leads = []
+    base_url = "https://www.googleapis.com/customsearch/v1"
+
+    print("\n" + "=" * 40)
+    print("📸 PRIORITY 1: Scanning Instagram Leads...")
+    print("=" * 40)
+
+    for query in insta_queries:
+        try:
+            print(f"🔍 Searching Instagram: {query}")
+            params = {
+                "key": YOUTUBE_API_KEY,
+                "cx": SEARCH_ENGINE_ID,
+                "q": query,
+                "num": 10
+            }
+            resp = requests.get(base_url, params=params, timeout=15).json()
+
+            if "error" in resp:
+                print(f"⚠️ Google API Error on Instagram: {resp['error'].get('message')}")
+                continue
+
+            items = resp.get("items", [])
+            print(f"   -> Result: {len(items)} profiles mile")
+
+            for item in items:
+                link = item.get("link", "")
+                if not link or link in existing_ids:
+                    continue
+
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+                full_text = f"{title} {snippet} {link}"
+
+                email = extract_email(full_text)
+                social = extract_social_handle(full_text)
+                if social == "N/A":
+                    social = link
+
+                row = [title, "Instagram", link, link, "Instagram Creator", email, social]
+                new_leads.append(row)
+                existing_ids.add(link)
+
+        except Exception as e:
+            print(f"⚠️ Instagram search error for '{query}': {e}")
+
+    print(f"🎯 Total Fresh Instagram Leads Extracted: {len(new_leads)}\n")
+    return new_leads
+
+# ==========================================
+# 5. PRIORITY #2: Twitter, LinkedIn & Facebook
+# ==========================================
+def collect_other_social_leads(existing_ids):
+    if not SEARCH_ENGINE_ID:
+        return []
+
+    other_queries = [
+        # Twitter/X
+        ('Twitter/X', 'site:twitter.com looking for video editor'),
+        ('Twitter/X', 'site:twitter.com hiring video editor'),
+        # LinkedIn
+        ('LinkedIn', 'site:linkedin.com/in content creator india'),
+        ('LinkedIn', 'site:linkedin.com/in video editor founder'),
+        # Facebook
+        ('Facebook', 'site:facebook.com video creator contact gmail')
+    ]
+
+    new_leads = []
+    base_url = "https://www.googleapis.com/customsearch/v1"
+
+    print("=" * 40)
+    print("🌐 PRIORITY 2: Scanning Twitter, LinkedIn & Facebook...")
+    print("=" * 40)
+
+    for platform_tag, query in other_queries:
+        try:
+            print(f"🔍 Searching {platform_tag}: {query}")
+            params = {
+                "key": YOUTUBE_API_KEY,
+                "cx": SEARCH_ENGINE_ID,
+                "q": query,
+                "num": 5
+            }
+            resp = requests.get(base_url, params=params, timeout=15).json()
+
+            if "error" in resp:
+                print(f"⚠️ Google API Error on {platform_tag}: {resp['error'].get('message')}")
+                continue
+
+            items = resp.get("items", [])
+            print(f"   -> Result: {len(items)} leads mili")
+
+            for item in items:
+                link = item.get("link", "")
+                if not link or link in existing_ids:
+                    continue
+
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+                full_text = f"{title} {snippet} {link}"
+
+                email = extract_email(full_text)
+                social = extract_social_handle(full_text)
+                if social == "N/A":
+                    social = link
+
+                row = [title, platform_tag, link, link, "Targeted Lead", email, social]
+                new_leads.append(row)
+                existing_ids.add(link)
+
+        except Exception as e:
+            print(f"⚠️ Error for '{query}': {e}")
+
+    return new_leads
+
+# ==========================================
+# 6. PRIORITY #3: YouTube Scraper (Last)
 # ==========================================
 def collect_youtube_leads(existing_ids):
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-    default_queries = [
+    queries = [
         "podcast clips hindi", "tech creator india", "finance creator hindi",
-        "roast video creators india", "gaming highlights hindi", "fitness coach india",
-        "podcast clips usa", "finance creator uk", "fitness coach us"
+        "roast video creators india", "fitness coach india"
     ]
+    if CUSTOM_QUERY:
+        queries = [CUSTOM_QUERY]
 
-    queries = [CUSTOM_QUERY] if CUSTOM_QUERY else default_queries
     new_leads = []
+    print("\n" + "=" * 40)
+    print("🎥 PRIORITY 3: Scanning YouTube Channels...")
+    print("=" * 40)
 
     for q in queries:
         try:
-            print(f"🎥 YouTube Searching: {q}")
-            req = youtube.search().list(
-                q=q,
-                part="snippet",
-                type="channel",
-                maxResults=15
-            )
+            print(f"🔍 Searching YouTube: {q}")
+            req = youtube.search().list(q=q, part="snippet", type="channel", maxResults=10)
             res = req.execute()
 
             channel_ids = [item["id"]["channelId"] for item in res.get("items", [])]
-            unique_ids = [
-                cid for cid in channel_ids 
-                if cid not in existing_ids and f"https://www.youtube.com/channel/{cid}" not in existing_ids
-            ]
+            unique_ids = [cid for cid in channel_ids if cid not in existing_ids and f"https://www.youtube.com/channel/{cid}" not in existing_ids]
 
             if not unique_ids:
                 continue
 
-            chan_req = youtube.channels().list(
-                part="snippet,statistics",
-                id=",".join(unique_ids)
-            )
+            chan_req = youtube.channels().list(part="snippet,statistics", id=",".join(unique_ids))
             chan_res = chan_req.execute()
 
             for chan in chan_res.get("items", []):
@@ -146,89 +270,16 @@ def collect_youtube_leads(existing_ids):
                 existing_ids.add(cid)
 
         except Exception as e:
-            print(f"⚠️ YouTube error on query '{q}': {e}")
+            print(f"⚠️ YouTube error on '{q}': {e}")
 
     return new_leads
 
 # ==========================================
-# 5. Multi-Platform Web Scraper (Google CSE)
-# ==========================================
-def collect_web_leads(existing_ids):
-    if not SEARCH_ENGINE_ID:
-        print("ℹ️ SEARCH_ENGINE_ID missing. Skipping Web search.")
-        return []
-
-    search_queries = [
-        'site:instagram.com "video creator" "gmail.com"',
-        'site:instagram.com "podcaster" "contact"',
-        'site:instagram.com "reels creator" India',
-        'site:twitter.com "looking for video editor"',
-        'site:twitter.com "hiring video editor"',
-        'site:twitter.com "need a video editor"',
-        'site:linkedin.com/in/ "content creator" India',
-        'site:linkedin.com/in/ "founder" "podcast"',
-        'site:facebook.com "video creator" "gmail.com"'
-    ]
-
-    new_leads = []
-    base_url = "https://www.googleapis.com/customsearch/v1"
-
-    for query in search_queries:
-        try:
-            params = {
-                "key": YOUTUBE_API_KEY,
-                "cx": SEARCH_ENGINE_ID,
-                "q": query,
-                "num": 5
-            }
-            resp = requests.get(base_url, params=params, timeout=15).json()
-
-            if "error" in resp:
-                print(f"⚠️ Google CSE Error: {resp['error'].get('message')}")
-                continue
-
-            items = resp.get("items", [])
-            print(f"🌐 Query: {query} -> Found: {len(items)}")
-
-            for item in items:
-                link = item.get("link", "")
-                if link in existing_ids:
-                    continue
-
-                title = item.get("title", "")
-                snippet = item.get("snippet", "")
-                full_text = f"{title} {snippet} {link}"
-
-                platform = "Web"
-                if "instagram.com" in link:
-                    platform = "Instagram"
-                elif "linkedin.com" in link:
-                    platform = "LinkedIn"
-                elif "twitter.com" in link or "x.com" in link:
-                    platform = "Twitter/X"
-                elif "facebook.com" in link:
-                    platform = "Facebook"
-
-                email = extract_email(full_text)
-                social = extract_social_handle(full_text)
-                if social == "N/A":
-                    social = link
-
-                row = [title, platform, link, link, "Targeted Lead", email, social]
-                new_leads.append(row)
-                existing_ids.add(link)
-
-        except Exception as e:
-            print(f"⚠️ Web query error for '{query}': {e}")
-
-    return new_leads
-
-# ==========================================
-# 6. Main Orchestrator
+# 7. Main Orchestration Flow
 # ==========================================
 def main():
     print("=" * 50)
-    print("🚀 Lead Generator Running...")
+    print("🚀 Lead Automation Engine Started")
     print("=" * 50)
 
     print("Connecting to Google Sheets...")
@@ -244,25 +295,27 @@ def main():
 
     print(f"📊 Sheet mein pehle se maujood links/IDs: {len(existing_ids)}")
 
-    print("\n🔍 Fetching YouTube Leads...")
+    # 1. Instagram FIRST
+    insta_leads = collect_instagram_leads(existing_ids)
+
+    # 2. Other Social Media (Twitter, LinkedIn, FB)
+    social_leads = collect_other_social_leads(existing_ids)
+
+    # 3. YouTube LAST
     yt_leads = collect_youtube_leads(existing_ids)
-    print(f"✅ YouTube se fresh leads mili: {len(yt_leads)}")
 
-    print("\n🔍 Fetching Multi-Platform Web Leads (Instagram / Twitter / LinkedIn / Facebook)...")
-    web_leads = collect_web_leads(existing_ids)
-    print(f"✅ Web platforms se fresh leads mili: {len(web_leads)}")
-
-    all_leads = yt_leads + web_leads
+    # Merge in exact priority order
+    all_leads = insta_leads + social_leads + yt_leads
 
     if all_leads:
-        print(f"\n📝 Writing {len(all_leads)} leads to Google Sheet...")
+        print(f"\n📝 Writing {len(all_leads)} leads into Google Sheet...")
         chunk_size = 50
         for i in range(0, len(all_leads), chunk_size):
             sheet.append_rows(all_leads[i:i + chunk_size])
             time.sleep(1)
         print("🎉 SUCCESS: Data successfully saved in Google Sheet!")
     else:
-        print("\nℹ️ Zero new leads to write (all were duplicates or empty).")
+        print("\nℹ️ Zero new leads to write.")
 
 if __name__ == "__main__":
     main()
